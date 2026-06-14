@@ -1,52 +1,74 @@
 ---
 name: pantheon
 description: >-
-  정답을 테스트로 정의할 수 있는 코딩 태스크를 멀티에이전트 하네스로 처리하는 스킬 (기본판, 외부 모델 불필요). 어려운 구현·대형
-  리팩터·마이그레이션처럼 정답을 테스트로 정의할 수 있는 코딩 태스크를 plan → 병렬 변형 구현(테스트 자기수정 T1 루프)
-  → 적대적 검증(Claude 자체) → 합성 파이프라인으로 처리해, 단발 1회보다 정확도를 높인다.
-  Claude Code의 Workflow 오케스트레이션만으로 동작한다. Use when 사용자가 "판테온", "판테온으로",
-  "여러 변형 만들어 테스트로 거르고 적대검증", "하드한 구현 빡세게", 또는 어려운 코딩/에이전트 작업을 멀티에이전트로
-  풀고 싶다고 할 때. 교차모델(GPT-5.5) 적대 검증이 필요하면 pantheon-x 스킬을 쓸 것. 쉬운 단발 질문·간단 수정엔 쓰지 말 것(비용 큼).
+  A skill that runs a hard, testable coding task through a multi-agent harness instead of a single
+  model pass (base variant, no external model needed). It takes implementations, large refactors, or
+  migrations whose correctness can be expressed as tests and runs them through plan → parallel
+  variants (with a test-driven self-correction loop) → adversarial verification (Claude itself) →
+  synthesis, raising correctness over a single pass. Works on Claude Code's Workflow orchestration
+  alone. Use when the user says "pantheon", "run it through pantheon", "build several variants, gate
+  on tests, then adversarially verify", "really hammer this implementation", or wants to solve a hard
+  coding/agentic task with multiple agents. For cross-model (GPT-5.5) adversarial verification, use
+  the pantheon-x skill instead. Don't use for easy one-shot questions or trivial edits (cost is high).
 ---
 
-# Pantheon harness (기본판)
+# Pantheon harness (base)
 
-코딩 태스크를 단발 1회가 아니라 멀티에이전트로 감싸는 하네스. 모델 가중치를 바꾸는 게 아니라, `plan → 병렬 변형 → 테스트 자기수정 → 적대 검증 → 합성`으로 **정답을 테스트로 정의할 수 있는 작업의 정확도**를 높인다. 검증된 기법(best-of-N·자기수정·적대 검증)을 한 커맨드로 묶은 것이지, 단발 추론 한계 자체를 바꾸진 않는다.
+A harness that wraps a coding task in multiple agents instead of a single pass. It does not change
+model weights; via `plan → parallel variants → test-driven self-correction → adversarial
+verification → synthesis` it raises correctness on work whose answer you can express as tests. It's
+proven techniques (best-of-N, self-correction, adversarial verification) bundled into one command —
+not a change to the model's single-shot reasoning.
 
-**이 기본판은 외부 모델 없이 Claude Code만으로 동작한다.** 적대 검증을 GPT-5.5(Codex)에게 맡기는 강화판은 `pantheon-x` 스킬을 쓸 것.
+**This base variant runs on Claude Code alone, no external model.** For the stronger variant that
+hands adversarial verification to GPT-5.5 (Codex), use the `pantheon-x` skill.
 
-## 전제 조건
-- **Claude Code의 Workflow 오케스트레이션이 필요하다.** 유료 플랜(Pro/Max/Team/Enterprise, v2.1.154+)에서만 동작하며 **Free 티어엔 없다.** Pro는 `/config`에서 **Dynamic workflows**를 한 번 켜야 한다. Workflow 툴이 없으면 이 스킬은 동작하지 않는다.
-- 외부 모델·플러그인은 불필요 — 적대 검증을 Claude 자체가 한다. (교차모델 검증이 필요하면 `pantheon-x`.)
+## Requirements
+- **Claude Code's Workflow orchestration is required.** It only runs on a paid plan
+  (Pro/Max/Team/Enterprise, v2.1.154+); it is **not on the Free tier**. On Pro, enable it once in
+  `/config` → **Dynamic workflows**. Without the Workflow tool this skill does not run.
+- No external model or plugin needed — Claude itself does the adversarial verification. (For
+  cross-model verification, use `pantheon-x`.)
 
-## 언제 쓰나
-- 어려운 구현/리팩터/마이그레이션, 또는 **정답을 테스트로 정의할 수 있는** 코딩 태스크.
-- 쉬운 단발 질문·사소한 수정엔 쓰지 말 것 — 그냥 답해라. 호출당 토큰이 크다(어려운 10~20%만 이걸로).
+## When to use
+- Hard implementations / refactors / migrations, or any coding task whose **correctness can be
+  defined as tests**.
+- Don't use for easy one-shot questions or trivial fixes — just answer directly. Each run costs real
+  tokens (route only the hardest 10–20% here).
 
-## 실행 절차 (이 스킬이 트리거되면)
-1. **태스크 확정.** 사용자 메시지에서 구현 요구사항을 뽑아라. 불명확하면 1~2개만 짧게 물어라 — 특히 *정답을 정의하는 테스트가 무엇인지*가 핵심.
-2. **환경 파라미터 결정:**
-   - `task`: 한 문단짜리 정확한 요구사항 + 받아들임 기준(테스트로 표현 가능하게).
-   - `workdir`: 작업 디렉토리 **절대경로**. 실제 레포면 그 경로, 임시 검증이면 `/tmp/pantheon-<짧은이름>`.
-   - `lang`: 언어 + **테스트 실행 명령**을 정확히. 예) `"TypeScript, vitest — \`pnpm test\`로 실행"`, `"pure Python 3, \`python3 -m unittest\`"`. 사용자 프로젝트의 실제 테스트러너를 먼저 확인해서 적어라.
-   - `variants`: 보통 3, 빡세면 5.
-   - `verifiers`: 보통 2, 빡세면 3 (과반이 진짜 결함 찾으면 탈락).
-3. **Workflow 실행** — 이 SKILL.md와 **같은 디렉토리의 `pantheon-class.js`를 Read**한 뒤, 그 내용을 Workflow의 `script` 인자로 인라인 전달한다:
+## Procedure (when this skill triggers)
+1. **Pin the task.** Extract the implementation requirement from the user's message. If unclear, ask
+   1–2 short questions — especially *what tests define correctness*.
+2. **Decide the parameters:**
+   - `task`: a one-paragraph precise requirement + acceptance criteria (expressible as tests).
+   - `workdir`: an **absolute path**. A real repo's path, or `/tmp/pantheon-<short-name>` for a
+     throwaway check.
+   - `lang`: the language + the **exact test command**, e.g. `"TypeScript, vitest — run with \`pnpm test\`"`,
+     `"pure Python 3, \`python3 -m unittest\`"`. Check the project's real test runner first.
+   - `variants`: usually 3, up to 5 for hard problems.
+   - `verifiers`: usually 2, up to 3 to be stricter (a build is dropped if a majority finds a real defect).
+3. **Run the Workflow** — **Read `pantheon-class.js` in this same directory**, then pass its contents
+   inline as the Workflow `script` argument:
    ```
    Workflow({
-     script: <pantheon-class.js 파일 내용>,
+     script: <contents of pantheon-class.js>,
      args: { task, workdir, lang, variants, verifiers, crossModelVerify: false }
    })
    ```
-   (이 스킬 지시가 곧 Workflow 호출 승인이다. `crossModelVerify`는 기본판이므로 항상 `false`.)
-4. **백그라운드로 돈다.** 완료 알림이 오면 결과를 보고: 변형별 테스트 통과 현황, 적대검증에서 누가 깨졌고 누가 살아남았는지, 최종 승자 경로·근거·이식할 아이디어.
+   (This skill's instruction is itself the approval to call Workflow. `crossModelVerify` is always
+   `false` for the base variant.)
+4. **It runs in the background.** When the completion notice arrives, report: per-variant test status,
+   who was broken vs. who survived adversarial verification, and the final winner's path, rationale,
+   and ideas worth grafting.
 
-## 파이프라인 (스크립트가 하는 일)
-- **Plan** — 스펙 + 테스트 계획 + 서로 다른 전략 N개 (코드 전에 "정답 정의"부터 고정).
-- **Implement** — 전략별 병렬 빌더. 각자 **테스트를 실제로 돌리고** 실패 → 수정 → 재실행을 최대 5회(T1 도구통합 자기검증).
-- **Verify** — green 변형마다 적대 리뷰어 V명이 "칭찬 말고 깨뜨려라", 과반이 진짜 결함 입증 시 탈락.
-- **Synthesize** — judge가 승자 선정 + 나머지의 더 나은 아이디어 이식 제안.
+## Pipeline (what the script does)
+- **Plan** — spec + test plan + N distinct strategies (fix the "definition of correct" before any code).
+- **Implement** — parallel builders, one per strategy. Each **actually runs the tests** and loops
+  fix → re-run up to 5 times (T1 tool-integrated self-verification).
+- **Verify** — for each green variant, V adversarial reviewers "don't praise it, break it"; dropped if
+  a majority proves a real defect.
+- **Synthesize** — a judge picks the winner and suggests the better ideas worth grafting from the rest.
 
-## 주의
-- **상주 프로세스가 아니다.** 호출당 일회성 실행 후 종료 — 안 돌릴 때 비용 0.
-- 코딩·에이전트 생산성 한정. 위험 능력(사이버/생물) 안전게이트 우회 용도 아님.
+## Notes
+- **Not a resident process.** One-shot per call, then exits — zero cost when idle.
+- Coding/agentic productivity only. Not for bypassing safety gates (cyber/bio capability restrictions).

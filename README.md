@@ -70,7 +70,7 @@ In Claude Code:
 Example:
 
 ```
-/pantheon 결제 모듈에 멱등키 처리 추가, 동시요청 중복결제 방지. 테스트는 pnpm test (vitest)
+/pantheon Add idempotency-key handling to the payments module so concurrent requests can't double-charge. Tests: pnpm test (vitest)
 ```
 
 Claude collects the parameters (`task`, `workdir`, `lang` + test command, `variants`, `verifiers`) and launches the harness as a background Workflow, then reports: per-variant test results, which builds the adversarial pass broke, and the final winner with its rationale and grafting suggestions.
