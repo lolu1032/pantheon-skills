@@ -1,6 +1,6 @@
 export const meta = {
-  name: 'mythos-class',
-  description: 'Wrap Opus 4.8 in a Mythos-class harness: plan -> parallel variants -> test-gate self-correction -> adversarial verify -> synthesize',
+  name: 'pantheon-class',
+  description: 'Wrap Opus 4.8 in a Pantheon harness: plan -> parallel variants -> test-gate self-correction -> adversarial verify -> synthesize',
   phases: [
     { title: 'Plan', detail: 'Decompose task into spec, test plan, and N strategies' },
     { title: 'Implement', detail: 'N variants in parallel; each runs its own tests and self-corrects (T1 loop)' },
@@ -16,7 +16,7 @@ if (typeof args === 'string') { try { A = args ? JSON.parse(args) : {} } catch (
 else if (args && typeof args === 'object') { A = args }
 
 const task = A.task ?? 'Implement a token-bucket rate limiter in pure Python 3 (standard library only). API: RateLimiter(capacity:int, refill_rate_per_sec:float) with method allow(now:float, tokens:int=1)->bool that consumes tokens if available at time now and returns True, else returns False without consuming. Tokens refill continuously at refill_rate_per_sec up to capacity. now is monotonic non-decreasing across calls.'
-const workdir = A.workdir ?? '/tmp/mythos-demo'
+const workdir = A.workdir ?? '/tmp/pantheon-demo'
 const lang = A.lang ?? 'pure Python 3 (standard library only); put the test file as test_limiter.py runnable with `python3 -m unittest`'
 const N = A.variants ?? 3
 const V = A.verifiers ?? 2
@@ -81,7 +81,7 @@ const FINAL_SCHEMA = {
 // ---- Phase 1: PLAN (test-time compute: think the spec + tests out first) ----
 phase('Plan')
 const plan = await agent(
-  `You are the PLANNER in a Mythos-class harness. Task:\n\n${task}\n\nProduce: (1) a tight spec, (2) a concrete test plan of edge cases that DEFINE correctness, and (3) exactly ${N} DISTINCT implementation strategies. Language/runtime constraint: ${lang}.`,
+  `You are the PLANNER in a Pantheon harness. Task:\n\n${task}\n\nProduce: (1) a tight spec, (2) a concrete test plan of edge cases that DEFINE correctness, and (3) exactly ${N} DISTINCT implementation strategies. Language/runtime constraint: ${lang}.`,
   { schema: PLAN_SCHEMA },
 )
 log(`Plan ready: ${plan.strategies.length} strategies, ${plan.testPlan.length} test cases`)
@@ -91,7 +91,7 @@ const strategies = plan.strategies.slice(0, N).map((s, i) => ({ s, i }))
 const built = await parallel(
   strategies.map(({ s, i }) => () =>
     agent(
-      `You are BUILDER #${i} in a Mythos-class harness. Implement this task using ONLY the strategy below; do not copy the other strategies.\n\nTASK:\n${task}\n\nSTRATEGY: ${s.name} — ${s.approach}\n\nLanguage/runtime: ${lang}\n\nSpec:\n${plan.spec}\nTest plan (cover EVERY case):\n- ${plan.testPlan.join('\n- ')}\n\nWORKDIR: create ${workdir}/variant-${i}. Write the implementation file AND the test file covering every case above. Then RUN the test command for this stack inside that dir. T1 SELF-CORRECTION LOOP: if any test fails, read the error, fix the implementation (not the tests, unless a test is genuinely wrong), and re-run. Repeat up to 5 iterations. Stop when all tests pass or after 5. Report variant ${i}, the absolute path, iterations used, tests total/passing, and whether all pass.`,
+      `You are BUILDER #${i} in a Pantheon harness. Implement this task using ONLY the strategy below; do not copy the other strategies.\n\nTASK:\n${task}\n\nSTRATEGY: ${s.name} — ${s.approach}\n\nLanguage/runtime: ${lang}\n\nSpec:\n${plan.spec}\nTest plan (cover EVERY case):\n- ${plan.testPlan.join('\n- ')}\n\nWORKDIR: create ${workdir}/variant-${i}. Write the implementation file AND the test file covering every case above. Then RUN the test command for this stack inside that dir. T1 SELF-CORRECTION LOOP: if any test fails, read the error, fix the implementation (not the tests, unless a test is genuinely wrong), and re-run. Repeat up to 5 iterations. Stop when all tests pass or after 5. Report variant ${i}, the absolute path, iterations used, tests total/passing, and whether all pass.`,
       { schema: BUILD_SCHEMA, phase: 'Implement', label: `impl:v${i} (${s.name})` },
     ),
   ),
@@ -132,7 +132,7 @@ log(`Survivors after adversarial verify: ${survivors.length}/${pool.length}`)
 phase('Synthesize')
 const candidates = survivors.length ? survivors : verified.filter(Boolean)
 const final = await agent(
-  `You are the JUDGE/SYNTHESIZER in a Mythos-class harness. Candidate implementations (all paths exist on disk):\n${candidates
+  `You are the JUDGE/SYNTHESIZER in a Pantheon harness. Candidate implementations (all paths exist on disk):\n${candidates
     .map((c) => `- variant ${c.variant} (${c.strategy ?? 'n/a'}) at ${c.path}: ${c.testsPassing}/${c.testsTotal} tests pass; confirmed refutations=${c.refutations?.length ?? 0}`)
     .join('\n')}\n\nRead the winner and runners-up. Pick the single best variant. List any superior ideas from the others worth grafting in. Give the winner's absolute path as finalPath and your confidence. Do NOT rewrite files; just decide and explain.`,
   { schema: FINAL_SCHEMA },

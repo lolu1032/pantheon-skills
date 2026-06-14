@@ -1,8 +1,8 @@
-# mythos-skills
+# pantheon-skills
 
 Two Claude Code skills that run a hard coding task through a multi-agent harness instead of a single model pass: **plan → N parallel implementations → adversarial verification → judge**. The point isn't a smarter model — it's that a second (and third) implementation, plus an independent reviewer whose job is to *break* the result, catches bugs a single pass ships green.
 
-It's a packaging of well-worn techniques — best-of-N sampling, tool-integrated self-correction, and LLM-as-judge / adversarial verification — wired into one `/mythos` command so you don't reassemble them by hand each time. This is scaffolding *around* the model, not a change *to* it: it won't rescue a task the model fundamentally can't reason about, but it reliably tightens correctness on coding work whose answer you can express as tests.
+It's a packaging of well-worn techniques — best-of-N sampling, tool-integrated self-correction, and LLM-as-judge / adversarial verification — wired into one `/pantheon` command so you don't reassemble them by hand each time. This is scaffolding *around* the model, not a change *to* it: it won't rescue a task the model fundamentally can't reason about, but it reliably tightens correctness on coding work whose answer you can express as tests.
 
 The harness runs a deterministic pipeline:
 
@@ -24,12 +24,12 @@ The value: a build can pass its *own* tests yet still be wrong. The adversarial 
 
 | Skill | Adversarial verifier | Requirements |
 |-------|----------------------|--------------|
-| **`mythos`** | Claude itself (independent agents) | Paid Claude Code plan + Workflows (see below) |
-| **`mythos-x`** | **GPT-5.5 via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (`codex:codex-rescue`) |
+| **`pantheon`** | Claude itself (independent agents) | Paid Claude Code plan + Workflows (see below) |
+| **`pantheon-x`** | **GPT-5.5 via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (`codex:codex-rescue`) |
 
-`mythos-x` is the stronger setting: the implementation written by Claude is attacked by a *different* model, which shrinks single-model blind spots (the same mistake slipping past a same-model verifier). If you don't have Codex/GPT-5.5, use `mythos`.
+`pantheon-x` is the stronger setting: the implementation written by Claude is attacked by a *different* model, which shrinks single-model blind spots (the same mistake slipping past a same-model verifier). If you don't have Codex/GPT-5.5, use `pantheon`.
 
-Both skills share the same harness (`mythos-class.js`); they differ only in the `crossModelVerify` flag.
+Both skills share the same harness (`pantheon-class.js`); they differ only in the `crossModelVerify` flag.
 
 ## Requirements
 
@@ -37,12 +37,12 @@ These skills drive Claude Code's **Workflow** orchestration engine, so a stock/F
 
 - **Claude Code ≥ v2.1.154** on a **paid plan** — Pro, Max, Team, or Enterprise (also Bedrock / Vertex / Foundry). **Not available on the Free tier.**
 - On **Pro**, enable it once: `/config` → turn on **Dynamic workflows**.
-- **`mythos-x` only:** the cross-model verifier runs as the `codex:codex-rescue` subagent, which ships in OpenAI's **Codex plugin** — *not* stock Claude Code. A logged-in `codex` CLI alone does **not** register it. Install the plugin:
+- **`pantheon-x` only:** the cross-model verifier runs as the `codex:codex-rescue` subagent, which ships in OpenAI's **Codex plugin** — *not* stock Claude Code. A logged-in `codex` CLI alone does **not** register it. Install the plugin:
   ```
   /plugin marketplace add openai/codex-plugin-cc
   /plugin install codex@openai-codex
   ```
-  plus a ChatGPT subscription (or `OPENAI_API_KEY`) and the `codex` CLI on PATH. **If `codex:codex-rescue` isn't installed, use `mythos` instead** — `mythos-x` would otherwise silently skip the adversarial pass and pass every build.
+  plus a ChatGPT subscription (or `OPENAI_API_KEY`) and the `codex` CLI on PATH. **If `codex:codex-rescue` isn't installed, use `pantheon` instead** — `pantheon-x` would otherwise silently skip the adversarial pass and pass every build.
 
 Skills and subagents themselves are stock Claude Code features; no extra setup beyond the above.
 
@@ -51,9 +51,9 @@ Skills and subagents themselves are stock Claude Code features; no extra setup b
 Clone into your Claude Code skills directory (personal install):
 
 ```bash
-git clone https://github.com/lolu1032/mythos-skills.git
-cp -R mythos-skills/mythos       ~/.claude/skills/mythos
-cp -R mythos-skills/mythos-x     ~/.claude/skills/mythos-x
+git clone https://github.com/lolu1032/pantheon-skills.git
+cp -R pantheon-skills/pantheon       ~/.claude/skills/pantheon
+cp -R pantheon-skills/pantheon-x     ~/.claude/skills/pantheon-x
 ```
 
 Or for a single project, copy into `<project>/.claude/skills/`.
@@ -63,14 +63,14 @@ Or for a single project, copy into `<project>/.claude/skills/`.
 In Claude Code:
 
 ```
-/mythos    <a hard implementation task whose correctness is testable>
-/mythos-x  <same, but GPT-5.5 does the adversarial verification>
+/pantheon    <a hard implementation task whose correctness is testable>
+/pantheon-x  <same, but GPT-5.5 does the adversarial verification>
 ```
 
 Example:
 
 ```
-/mythos 결제 모듈에 멱등키 처리 추가, 동시요청 중복결제 방지. 테스트는 pnpm test (vitest)
+/pantheon 결제 모듈에 멱등키 처리 추가, 동시요청 중복결제 방지. 테스트는 pnpm test (vitest)
 ```
 
 Claude collects the parameters (`task`, `workdir`, `lang` + test command, `variants`, `verifiers`) and launches the harness as a background Workflow, then reports: per-variant test results, which builds the adversarial pass broke, and the final winner with its rationale and grafting suggestions.
@@ -80,11 +80,11 @@ Claude collects the parameters (`task`, `workdir`, `lang` + test command, `varia
 | arg | default | notes |
 |-----|---------|-------|
 | `task` | — | one-paragraph requirement + acceptance criteria (expressible as tests) |
-| `workdir` | `/tmp/mythos-<name>` | absolute path; a real repo or a scratch dir |
+| `workdir` | `/tmp/pantheon-<name>` | absolute path; a real repo or a scratch dir |
 | `lang` | Python/unittest | language **+ the exact test command** for your stack |
 | `variants` | 3 | bump to 5 for harder problems |
 | `verifiers` | 2 | bump to 3 to be stricter (majority refutation drops a build) |
-| `crossModelVerify` | `false` (`mythos`) / `true` (`mythos-x`) | route adversarial verify to GPT-5.5/Codex |
+| `crossModelVerify` | `false` (`pantheon`) / `true` (`pantheon-x`) | route adversarial verify to GPT-5.5/Codex |
 
 ## Cost & scope
 
@@ -96,7 +96,7 @@ Claude collects the parameters (`task`, `workdir`, `lang` + test command, `varia
 ## FAQ
 
 **Isn't this just a prompt wrapper?**
-There's no model change — it's orchestration, yes. The non-trivial part is the *adversarial* step: an independent agent (a different model in `mythos-x`) whose job is to break a build rather than confirm it. That's what catches defects the builder's own green tests rubber-stamp. The value is the harness shape, not a secret prompt.
+There's no model change — it's orchestration, yes. The non-trivial part is the *adversarial* step: an independent agent (a different model in `pantheon-x`) whose job is to break a build rather than confirm it. That's what catches defects the builder's own green tests rubber-stamp. The value is the harness shape, not a secret prompt.
 
 **Do you have benchmarks vs. plain Opus?**
 No formal benchmark yet — treat the description as *mechanism*, not a measured delta. The honest evidence is anecdotal: on a real CMS codebase it surfaced a timezone-dependent scheduling bug that passed the implementation's own tests. If you run a head-to-head, I'd genuinely like to see the numbers.
@@ -108,7 +108,7 @@ A few hundred K to ~1M tokens and ~6–10 min at default settings; more for `var
 You're likely on the Free tier, or haven't enabled workflows. See [Requirements](#requirements) — needs a paid plan and, on Pro, `/config` → **Dynamic workflows**.
 
 **Why route verification to GPT-5.5 / another vendor's model?**
-Same-model verifiers share blind spots — a mistake the builder makes, a same-model reviewer tends to miss too. A *different* model is a cheap way to break that correlation. It's optional: `mythos` runs Claude-on-Claude and still helps.
+Same-model verifiers share blind spots — a mistake the builder makes, a same-model reviewer tends to miss too. A *different* model is a cheap way to break that correlation. It's optional: `pantheon` runs Claude-on-Claude and still helps.
 
 ## Status
 

@@ -6,16 +6,16 @@ body:
     attributes:
       value: |
         Most "nothing happens" reports are environment, not bugs. Please skim
-        [Requirements](https://github.com/lolu1032/mythos-skills#requirements) and
-        [FAQ](https://github.com/lolu1032/mythos-skills#faq) first — **Free tier** and a
+        [Requirements](https://github.com/lolu1032/pantheon-skills#requirements) and
+        [FAQ](https://github.com/lolu1032/pantheon-skills#faq) first — **Free tier** and a
         **missing Codex plugin** are the usual causes.
   - type: dropdown
     id: skill
     attributes:
       label: Which skill?
       options:
-        - mythos
-        - mythos-x
+        - pantheon
+        - pantheon-x
     validations:
       required: true
   - type: input
@@ -46,7 +46,7 @@ body:
       label: Preflight (check the FAQ first)
       options:
         - label: "On Pro, I enabled `/config` → Dynamic workflows"
-        - label: "For mythos-x: the `codex:codex-rescue` agent type is installed (Codex plugin) — not just a `codex` CLI login"
+        - label: "For pantheon-x: the `codex:codex-rescue` agent type is installed (Codex plugin) — not just a `codex` CLI login"
   - type: textarea
     id: what
     attributes:
