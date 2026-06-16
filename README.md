@@ -1,6 +1,6 @@
 # pantheon-skills
 
-Two Claude Code skills that run a hard coding task through a multi-agent harness instead of a single model pass: **plan → N parallel implementations → adversarial verification → judge**. The point isn't a smarter model — it's that a second (and third) implementation, plus an independent reviewer whose job is to *break* the result, catches bugs a single pass ships green.
+Two Claude Code skills that run a hard coding task through a multi-agent harness instead of a single model pass: **plan → N parallel implementations → adversarial verification → judge**. The point isn't a smarter model — it's that a second (and third) implementation, plus an independent reviewer whose job is to *break* the result, catches bugs a single pass ships green. A third skill, **`pantheon-gap`**, turns the same shape into a reviewer: it points the harness at an *existing* project and reports what's missing.
 
 It's a packaging of well-worn techniques — best-of-N sampling, tool-integrated self-correction, and LLM-as-judge / adversarial verification — wired into one `/pantheon` command so you don't reassemble them by hand each time. This is scaffolding *around* the model, not a change *to* it: it won't rescue a task the model fundamentally can't reason about, but it reliably tightens correctness on coding work whose answer you can express as tests.
 
@@ -20,7 +20,7 @@ Plan ──▶ Implement (×N parallel) ──▶ Verify (adversarial ×V) ─�
 
 The value: a build can pass its *own* tests yet still be wrong. The adversarial layer catches defects the self-written tests miss, instead of rubber-stamping a green build.
 
-## The two skills
+## The two generation skills
 
 | Skill | Adversarial verifier | Requirements |
 |-------|----------------------|--------------|
@@ -30,6 +30,26 @@ The value: a build can pass its *own* tests yet still be wrong. The adversarial 
 `pantheon-x` is the stronger setting: the implementation written by Claude is attacked by a *different* model, which shrinks single-model blind spots (the same mistake slipping past a same-model verifier). If you don't have Codex/GPT-5.5, use `pantheon`.
 
 Both skills share the same harness (`pantheon-class.js`); they differ only in the `crossModelVerify` flag.
+
+## The review twin (`pantheon-gap`)
+
+`pantheon` and `pantheon-x` *generate* code. **`pantheon-gap`** runs the same multi-agent shape in the other direction — at an existing project — to answer "what's missing?":
+
+```
+Map ──▶ Probe (×N dimensions) ──▶ Confirm (adversarial) ──▶ Synthesize
+ │            │ one agent per          │ skeptical reviewers      │ judge dedups,
+ 1 scout      │ dimension hunts        │ try to DISMISS each      │ prioritizes by
+ (purpose,    │ gaps with file-        │ finding; kept only if    │ impact × effort
+  stack,      │ level evidence         │ a majority confirm it    │
+  maturity)   N probes                  reviewers
+```
+
+- **Map** — a scout reads the README/structure/manifests/tests/CI and picks the dimensions worth auditing for *this* project (completeness, correctness, tests, security, docs, architecture, DX, performance, ops).
+- **Probe** — one agent per dimension hunts for gaps, each citing file-level evidence.
+- **Confirm** — the same adversarial trick, inverted: reviewers try to *dismiss* each finding, so the false positives a single-pass review sprays get dropped.
+- **Synthesize** — a judge dedups and prioritizes: top gaps, quick wins, and the single highest-leverage fix.
+
+It **reports** gaps; it does not fix them — hand the report to `pantheon` (or plain Opus) to act on. Set `crossModelVerify: true` to run the confirm step on GPT-5.5 (Codex), as with `pantheon-x`.
 
 ## Requirements
 
@@ -54,6 +74,7 @@ Clone into your Claude Code skills directory (personal install):
 git clone https://github.com/lolu1032/pantheon-skills.git
 cp -R pantheon-skills/pantheon       ~/.claude/skills/pantheon
 cp -R pantheon-skills/pantheon-x     ~/.claude/skills/pantheon-x
+cp -R pantheon-skills/pantheon-gap   ~/.claude/skills/pantheon-gap
 ```
 
 Or for a single project, copy into `<project>/.claude/skills/`.
@@ -63,14 +84,18 @@ Or for a single project, copy into `<project>/.claude/skills/`.
 In Claude Code:
 
 ```
-/pantheon    <a hard implementation task whose correctness is testable>
-/pantheon-x  <same, but GPT-5.5 does the adversarial verification>
+/pantheon     <a hard implementation task whose correctness is testable>
+/pantheon-x   <same, but GPT-5.5 does the adversarial verification>
+/pantheon-gap <path to an existing project>   # gap analysis / feedback review, not generation
 ```
 
 Example:
 
 ```
 /pantheon Add idempotency-key handling to the payments module so concurrent requests can't double-charge. Tests: pnpm test (vitest)
+```
+```
+/pantheon-gap Audit /path/to/my-repo — what's missing before launch? Focus on tests and security.
 ```
 
 Claude collects the parameters (`task`, `workdir`, `lang` + test command, `variants`, `verifiers`) and launches the harness as a background Workflow, then reports: per-variant test results, which builds the adversarial pass broke, and the final winner with its rationale and grafting suggestions.
