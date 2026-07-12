@@ -11,6 +11,7 @@ import {
   selectBuildPool,
   selectFixPool,
   applyAudit,
+  applyBuildAudit,
   selectCandidates,
   bucketGaps,
   outcomeReason,
@@ -219,6 +220,27 @@ test('an honest fixer is confirmed, not punished', () => {
   const r = applyAudit({ variant: 0, reproPasses: true, regressed: false }, { reproPasses: true, regressed: false })
   assert.equal(r.selfReportMismatch, false)
   assert.equal(selectFixPool([r], true).outcome, 'ok')
+})
+
+test('generation: the audit overrides a builder that self-reported green', () => {
+  const b = applyBuildAudit({ variant: 0, allTestsPass: true, testsPassing: 8, testsTotal: 8 }, { allTestsPass: false, testsPassing: 6, testsTotal: 8 })
+  assert.equal(b.allTestsPass, false)
+  assert.equal(b.testsPassing, 6, "the auditor's counts win")
+  assert.equal(b.selfReportMismatch, true)
+  assert.equal(selectBuildPool([b]).outcome, 'no_green_candidate')
+})
+
+test('generation: a builder that weakened the canonical test is caught', () => {
+  const b = applyBuildAudit({ variant: 0, allTestsPass: true }, { allTestsPass: false, testWasTampered: true })
+  assert.equal(b.testWasTampered, true)
+  assert.equal(b.allTestsPass, false, 'it was only green because it had edited the test')
+})
+
+test('generation: an UNAUDITED build is not green', () => {
+  const b = applyBuildAudit({ variant: 0, allTestsPass: true }, null)
+  assert.equal(b.auditFailed, true)
+  assert.equal(b.allTestsPass, false)
+  assert.deepEqual(selectBuildPool([b]).pool, [])
 })
 
 // ---------------------------------------------------------------------------

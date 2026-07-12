@@ -110,7 +110,7 @@ The model id is OpenClaw-style **`provider/model-id`** (`anthropic/haiku`, `olla
 > - **Evidence containment is prompt-enforced, not harness-enforced.** When `pantheon-gap-custom` ships cited code to an external provider, the driver agent is *instructed* to `realpath`-check every path against the target and to report what it sent (`filesSent` / `filesSkipped`). A determined prompt injection in a hostile repo could still talk it out of that. Don't point the custom gap skills at a repo you don't trust.
 > - **Some provider endpoints are `"unverified": true`.** Their base URLs come from docs, not from a live call with a real key. A wrong one surfaces as an `unavailable` verdict (an abstention), never a silent pass.
 > - **Only put providers you trust into `providers.json` / `config.json`.** The scheme is validated; the host is whatever you wrote. Treat these as secret-adjacent config.
-> - **The generation skills still let each builder write its own tests**, so "green" doesn't mean quite the same thing across variants there. `pantheon-fix` no longer has this problem (see below); porting the same canonical-test model to generation is the next step.
+> - **Evidence containment is prompt-enforced, not harness-enforced** (see the note above) — the one gap where the harness asks an agent to police itself.
 
 ## Requirements
 
@@ -279,24 +279,32 @@ refuted field, and `apply: true` would have written it to the working tree. The 
 of why every approach fails. That's the whole product: a harness that refuses is worth more than one
 that guesses.
 
-## A fixer may not grade its own homework
+## No variant grades its own homework
 
-`pantheon-fix` used to let each variant write its own repro test. That sounds harmless until you watch
-it fail: pointed at a real anti-cheat bypass, six candidates across two rounds each wrote a repro test,
-each made it pass, and the adversarial reviewers broke **all six**. Every one had written a test just
-weak enough to be satisfied by the fix it happened to produce.
+Every skill used to let each variant write its own tests and then report whether they passed. That
+sounds harmless until you watch it fail: pointed at a real anti-cheat bypass, six candidate fixes
+across two rounds each wrote a repro test, each made it pass, and the adversarial reviewers broke
+**all six**. Every one had written a test just weak enough to be satisfied by the fix it happened to
+produce.
 
-So the test moved out of the fixer's hands:
+So the test moved out of the variants' hands, in the fix *and* generation skills:
 
-1. **The planner owns the canonical repro test** — it writes the complete test file, proves it fails at
-   HEAD for the *right* reason, and is told to cover the bypasses a lazy fix would miss.
-2. **Every variant runs that same file**, verbatim, and is forbidden from editing, weakening, skipping
-   or special-casing it. "Green" now means the same thing across variants, so comparing them finally
-   means something.
-3. **An independent auditor re-writes the canonical test from the planner's copy and re-runs the suite.**
-   Its observation — not the fixer's self-report — is what the gate sees. Tampering is detected and
+1. **The planner owns the canonical test.** In `pantheon-fix` it writes the repro test and proves it
+   fails at HEAD for the *right* reason. In the generation skills it also pins an **API contract** —
+   the exact surface every variant must implement — and writes the test against it.
+2. **Every variant runs that same file**, byte for byte, and may not edit, weaken, skip, rename or
+   special-case it. "Green" now means the same thing across variants, so comparing them finally means
+   something — and because they share one API, the winner is a drop-in for any of them.
+3. **An independent auditor re-writes the canonical test from the planner's copy and re-runs it.** Its
+   observation — never the variant's self-report — is what the gate sees. Tampering is detected and
    reported; a variant whose audit didn't run is `unaudited` and cannot win, for the same reason an
    unverified one can't.
+
+The payoff shows up immediately. On a live LRU+TTL cache run, all three variants shipped a
+byte-identical 27-case test and the same import surface — which let the judge fuzz all three against
+each other (4,000 trials, zero behavioral divergence) and then pick on *auditability* rather than
+guessing at correctness. That comparison was impossible when each variant invented its own API and its
+own tests.
 
 ## How the safety gates work
 

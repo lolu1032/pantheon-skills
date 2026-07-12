@@ -206,6 +206,23 @@ function applyAudit(fix, audit) {
   }
 }
 
+// Same audit, generation side. A builder used to write its own test file AND report whether it
+// passed — so "green" was self-graded and meant something different in every variant. The planner
+// now owns one canonical test file; this folds the auditor's independent re-run over what the
+// builder claimed. An unaudited build is not green, whatever it says about itself.
+function applyBuildAudit(build, audit) {
+  if (!audit) return { ...build, allTestsPass: false, auditFailed: true }
+  return {
+    ...build,
+    allTestsPass: audit.allTestsPass,
+    testsPassing: audit.testsPassing ?? build.testsPassing,
+    testsTotal: audit.testsTotal ?? build.testsTotal,
+    testWasTampered: Boolean(audit.testWasTampered),
+    selfReportMismatch: build.allTestsPass !== audit.allTestsPass,
+    auditFailed: false,
+  }
+}
+
 // A candidate may win only if a real adversarial vote reached quorum AND did not refute it.
 function selectCandidates(verified) {
   const scored = verified.filter(Boolean)
@@ -247,6 +264,9 @@ const PLAN_SCHEMA = {
   properties: {
     spec: { type: 'string', description: 'Tight restatement of the requirement' },
     testPlan: { type: 'array', items: { type: 'string' }, description: 'Concrete test cases that define correctness' },
+    apiContract: { type: 'string', description: 'The EXACT public API every variant must implement — module/file name, function/class signatures, argument order and types. The canonical test imports this, so all variants must match it byte for byte.' },
+    testPath: { type: 'string', description: 'Filename of the canonical test file (relative to each variant dir).' },
+    testContent: { type: 'string', description: 'COMPLETE contents of the canonical test file, verbatim and runnable. Every variant runs THIS EXACT file — it is the shared, fixed definition of correct.' },
     strategies: {
       type: 'array',
       items: {
@@ -257,7 +277,7 @@ const PLAN_SCHEMA = {
       description: 'Distinct implementation strategies, one per variant',
     },
   },
-  required: ['spec', 'testPlan', 'strategies'],
+  required: ['spec', 'testPlan', 'strategies', 'apiContract', 'testPath', 'testContent'],
 }
 
 const BUILD_SCHEMA = {
@@ -302,7 +322,13 @@ const FINAL_SCHEMA = {
 // ---- Phase 1: PLAN (test-time compute: think the spec + tests out first) ----
 phase('Plan')
 const plan = await agent(
-  `You are the PLANNER in a Pantheon harness. Task:\n\n${task}\n\nProduce: (1) a tight spec, (2) a concrete test plan of edge cases that DEFINE correctness, and (3) exactly ${N} DISTINCT implementation strategies. Language/runtime constraint: ${lang}.`,
+  `You are the PLANNER in a Pantheon harness. Task:\n\n${task}\n\nLanguage/runtime constraint: ${lang}\n\n` +
+    `Produce:\n` +
+    `1. A tight spec.\n` +
+    `2. An apiContract: the EXACT public API every variant must implement (file/module name, signatures, argument order, return types). The variants are independent implementations of ONE contract — if they each invent their own surface, nothing can be compared or swapped.\n` +
+    `3. A concrete testPlan of the edge cases that DEFINE correctness (boundaries, rounding, empty, overflow, concurrency — whatever applies).\n` +
+    `4. THE CANONICAL TEST FILE ITSELF — testPath + testContent, complete and runnable, written against the apiContract and covering every case in the testPlan. This one file is the shared, fixed definition of correct: every variant runs THIS EXACT file and none of them may edit it. Make it strong enough that an implementation which only handles the happy path FAILS. Do not test internals, only the contract.\n` +
+    `5. Exactly ${N} DISTINCT implementation strategies — genuinely different approaches to the same contract, not cosmetic variations.`,
   { schema: PLAN_SCHEMA },
 )
 log(`Plan ready: ${plan.strategies.length} strategies, ${plan.testPlan.length} test cases`)
@@ -312,7 +338,16 @@ const strategies = plan.strategies.slice(0, N).map((s, i) => ({ s, i }))
 const built = await parallel(
   strategies.map(({ s, i }) => () =>
     agent(
-      `You are BUILDER #${i} in a Pantheon harness. Implement this task using ONLY the strategy below; do not copy the other strategies.\n\nTASK:\n${task}\n\nSTRATEGY: ${s.name} — ${s.approach}\n\nLanguage/runtime: ${lang}\n\nSpec:\n${plan.spec}\nTest plan (cover EVERY case):\n- ${plan.testPlan.join('\n- ')}\n\nWORKDIR: create ${workdir}/variant-${i}. Write the implementation file AND the test file covering every case above. Then RUN the test command for this stack inside that dir. T1 SELF-CORRECTION LOOP: if any test fails, read the error, fix the implementation (not the tests, unless a test is genuinely wrong), and re-run. Repeat up to 5 iterations. Stop when all tests pass or after 5. Report variant ${i}, the absolute path, iterations used, tests total/passing, and whether all pass.`,
+      `You are BUILDER #${i} in a Pantheon harness. Implement this task using ONLY the strategy below; do not copy the other strategies.\n\n` +
+        `TASK:\n${task}\n\nSTRATEGY: ${s.name} — ${s.approach}\n\nLanguage/runtime: ${lang}\n\nSpec:\n${plan.spec}\n\n` +
+        `API CONTRACT — implement EXACTLY this surface. The canonical test imports it, so any deviation just fails:\n${plan.apiContract}\n\n` +
+        `WORKDIR: create ${workdir}/variant-${i}.\n` +
+        `1. Write the CANONICAL TEST FILE there, EXACTLY as given, byte for byte, then treat it as READ-ONLY:\n` +
+        `   PATH: ${plan.testPath}\n` +
+        `   <<<CANONICAL_TEST\n${plan.testContent}\nCANONICAL_TEST\n` +
+        `   You may NOT edit, weaken, delete, skip or rename it, and you may NOT special-case it from the implementation. An independent auditor re-writes this file from the original and re-runs it, so touching it only wastes your run.\n` +
+        `2. Write the implementation file and make the canonical test pass. T1 SELF-CORRECTION LOOP: if a test fails, read the error, fix the IMPLEMENTATION, re-run. Up to 5 iterations. You may add EXTRA tests of your own in a separate file, but the canonical one decides.\n` +
+        `Report variant ${i}, the absolute path, iterations used, tests total/passing, and whether all pass.`,
       { schema: BUILD_SCHEMA, phase: 'Implement', label: `impl:v${i} (${s.name})` },
     ),
   ),
@@ -322,16 +357,57 @@ if (!ok.length) {
   log('No variant produced a runnable build; aborting.')
   return { task, plan, built: [], error: 'no runnable builds' }
 }
-const green = ok.filter((b) => b.allTestsPass)
-log(`Built ${ok.length}/${N}; green (all tests pass): ${green.length}`)
+// AUDIT: never gate on a number the builder reported about its own work. A separate agent restores
+// the canonical test file from the planner's copy (undoing any tampering), re-runs it, and reports
+// what it actually observed. These values — not the builder's — feed the gate.
+const audits = await parallel(
+  ok.map((b) => () =>
+    agent(
+      `You are the TEST AUDITOR for variant ${b.variant} at ${b.path}. Do NOT fix anything and do NOT judge the code — you only re-establish the ground truth and report it.\n\n` +
+        `1. cd ${b.path}\n` +
+        `2. OVERWRITE ${plan.testPath} with EXACTLY this content (the canonical test; the builder was told not to touch it, but verify rather than trust):\n` +
+        `<<<CANONICAL_TEST\n${plan.testContent}\nCANONICAL_TEST\n` +
+        `   Report testWasTampered=true if what was there differed in any way beyond whitespace.\n` +
+        `3. Run the canonical test with the test command for this stack (${lang}).\n` +
+        `4. Report, from what you actually observed: testsTotal, testsPassing, allTestsPass.\n` +
+        `Report honestly even if it contradicts the builder — that is the entire point of this step.`,
+      {
+        schema: {
+          type: 'object',
+          properties: {
+            variant: { type: 'number' },
+            allTestsPass: { type: 'boolean' },
+            testsTotal: { type: 'number' },
+            testsPassing: { type: 'number' },
+            testWasTampered: { type: 'boolean' },
+            notes: { type: 'string' },
+          },
+          required: ['variant', 'allTestsPass'],
+        },
+        phase: 'Implement',
+        label: `audit:v${b.variant}`,
+      },
+    ).then((a) => ({ b, a })),
+  ),
+)
+const auditByVariant = new Map(audits.filter(Boolean).map(({ b, a }) => [b.variant, a]))
+const built2 = ok.map((b) => applyBuildAudit(b, auditByVariant.get(b.variant) ?? null))
+for (const b of built2) {
+  if (b.auditFailed) log(`⚠️ v${b.variant}: the test audit did not run — it is not green (an unaudited build cannot be trusted).`)
+  if (b.testWasTampered) log(`🚨 v${b.variant} EDITED THE CANONICAL TEST. Restored it and re-ran; the restored result is what counts.`)
+  if (b.selfReportMismatch) log(`⚠️ v${b.variant} self-reported allTestsPass=${!b.allTestsPass}, but the audit found ${b.allTestsPass}. Using the audit.`)
+}
 
-const builtReport = ok.map((b) => ({ variant: b.variant, strategy: b.strategy, iterations: b.iterations, tests: `${b.testsPassing}/${b.testsTotal}`, allPass: b.allTestsPass }))
-const planReport = { spec: plan.spec, testCount: plan.testPlan.length, strategies: plan.strategies.map((s) => s.name) }
+const green = built2.filter((b) => b.allTestsPass)
+log(`Built ${ok.length}/${N}; green after independent audit: ${green.length}`)
+
+const builtReport = built2.map((b) => ({ variant: b.variant, strategy: b.strategy, iterations: b.iterations, tests: `${b.testsPassing}/${b.testsTotal}`, allPass: b.allTestsPass, testWasTampered: b.testWasTampered ?? false, auditFailed: b.auditFailed ?? false }))
+const planReport = { spec: plan.spec, apiContract: plan.apiContract, canonicalTest: plan.testPath, testCount: plan.testPlan.length, strategies: plan.strategies.map((s) => s.name) }
 
 // ---- Phase 3: ADVERSARIAL VERIFY — independent reviewers try to BREAK each candidate ----
 // GATE 1 (fail-closed): only a variant whose own suite is green may be reviewed. There is no
 // "least-failing variant" consolation prize — a red build is not a candidate.
-const { pool, outcome: poolOutcome } = selectBuildPool(ok)
+const { pool, outcome: poolOutcome } = selectBuildPool(built2)
 if (poolOutcome !== 'ok') {
   log(`⛔ ${outcomeReason(poolOutcome)} — no winner.`)
   return { task, plan: planReport, built: builtReport, green: [], outcome: poolOutcome, reason: outcomeReason(poolOutcome), final: null }
