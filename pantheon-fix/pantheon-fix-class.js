@@ -567,9 +567,12 @@ try {
   const fixesReport = fixes.map((f) => ({ variant: f.variant, strategy: f.strategy, regressed: f.regressed, reproPasses: f.reproPasses, linesChanged: f.linesChanged }))
   const planReport = { bugSpec: plan.bugSpec, testable: plan.testable, strategies: plan.strategies.map((s) => s.name) }
   const baseReport = { green: baseline.green, passing: baseline.passing, total: baseline.total, testCommand: testCmd }
-  const noWinner = (outcome) => ({
-    repo, gap, verifier: VR.who, baseline: baseReport, plan: planReport, fixes: fixesReport,
+  // `prov` is passed once the verify phase has run; before that there is nothing to audit.
+  const noWinner = (outcome, prov) => ({
+    repo, gap, verifier: VR.who, verifierModel: VR.model ?? null, baseline: baseReport, plan: planReport, fixes: fixesReport,
     outcome, reason: outcomeReason(outcome), patch: '', applied: null, final: null,
+    crossModelVerified: prov ? prov.verified : false,
+    verdictProvenance: prov ?? null,
     note: `No patch is being offered: ${outcomeReason(outcome)}.`,
   })
 
@@ -613,10 +616,18 @@ try {
   // had refuted.
   const { candidates, outcome: verdictOutcome, refuted, unverified } = selectCandidates(verified)
   const verifiedReport = verified.filter(Boolean).map((v) => ({ variant: v.variant, refuted: v.refuted, confirmedDefects: v.refutations.length, unverified: v.unverified, realVerdicts: v.realCount, quorum: v.quorum, unavailableVerdicts: v.unavailableVerdicts }))
+
+  // Provenance audit — did the cross-model verification the caller ASKED for actually happen?
+  const provenance = crossModelAudit(verified.filter(Boolean), requireCodex)
+  if (requireCodex) {
+    if (provenance.fromCodex === 0) log(`🚨 CROSS-MODEL VERIFY FAILED: 0/${provenance.total} verdicts came from ${VR.who}. This is NOT an -x run.`)
+    else if (!provenance.verified) log(`⚠️ PARTIAL cross-model verify: only ${provenance.fromCodex}/${provenance.total} verdicts (${provenance.pct}%) came from ${VR.who}.`)
+    else log(`✅ Cross-model verified: ${provenance.fromCodex}/${provenance.total} verdicts came from ${VR.who}.`)
+  }
   log(`Survivors after adversarial verify: ${candidates.length}/${pool.length} (refuted ${refuted.length}, unverified ${unverified.length})`)
   if (verdictOutcome !== 'ok') {
     log(`⛔ ${outcomeReason(verdictOutcome)} — no winner.`)
-    result = { ...noWinner(verdictOutcome), verified: verifiedReport }
+    result = { ...noWinner(verdictOutcome, provenance), verified: verifiedReport }
     return result
   }
 
@@ -671,6 +682,9 @@ try {
     refuted: refuted.map((r) => r.variant),
     unverified: unverified.map((u) => u.variant),
     outcome: 'ok',
+    // Trust THIS, not the skill's name: false means the run degraded to same-model review.
+    crossModelVerified: provenance.verified,
+    verdictProvenance: provenance,
     final: { winner: final.winner, rationale: final.rationale, confidence: final.confidence, testUnverified: final.testUnverified, graftedIdeas: final.graftedIdeas, reviewNotes: final.reviewNotes },
     patch: finalPatch,
     applied: doApply ? applied : null,
