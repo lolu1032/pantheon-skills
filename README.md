@@ -1,6 +1,6 @@
 # pantheon-skills
 
-Claude Code skills that run a hard coding task through a multi-agent harness instead of a single model pass: **plan → N parallel implementations → adversarial verification → judge**. The point isn't a smarter model — it's that a second (and third) implementation, plus an independent reviewer whose job is to *break* the result, catches bugs a single pass ships green. A second pair — **`pantheon-gap`** and its cross-model twin **`pantheon-gap-x`** — turns the same shape into a reviewer: it points the harness at an *existing* project and reports what's missing. Each side also has a **configurable** variant — **`pantheon-custom`** / **`pantheon-gap-custom`** — that lets you pick which model runs the adversarial step — a Claude tier, GPT-5.5, or a cross-vendor/local model (DeepSeek, Qwen, Kimi, a local Ollama model …) routed through the `codex` CLI. A **third** trio — **`pantheon-fix`** (+ `-x` / `-custom`) — closes the loop: it takes a known defect and *applies* a regression-safe patch in an isolated git worktree, diff-only until you approve.
+Claude Code skills that run a hard coding task through a multi-agent harness instead of a single model pass: **plan → N parallel implementations → adversarial verification → judge**. The point isn't a smarter model — it's that a second (and third) implementation, plus an independent reviewer whose job is to *break* the result, catches bugs a single pass ships green. A second pair — **`pantheon-gap`** and its cross-model twin **`pantheon-gap-x`** — turns the same shape into a reviewer: it points the harness at an *existing* project and reports what's missing. Each side also has a **configurable** variant — **`pantheon-custom`** / **`pantheon-gap-custom`** — that lets you pick which model runs the adversarial step — a Claude tier, GPT-5.6 Sol, or a cross-vendor/local model (DeepSeek, Qwen, Kimi, a local Ollama model …) routed through the `codex` CLI. A **third** trio — **`pantheon-fix`** (+ `-x` / `-custom`) — closes the loop: it takes a known defect and *applies* a regression-safe patch in an isolated git worktree, diff-only until you approve.
 
 It's a packaging of well-worn techniques — best-of-N sampling, tool-integrated self-correction, and LLM-as-judge / adversarial verification — wired into one `/pantheon` command so you don't reassemble them by hand each time. This is scaffolding *around* the model, not a change *to* it: it won't rescue a task the model fundamentally can't reason about, but it reliably tightens correctness on coding work whose answer you can express as tests.
 
@@ -25,12 +25,12 @@ The value: a build can pass its *own* tests yet still be wrong. The adversarial 
 | Skill | Adversarial verifier | Requirements |
 |-------|----------------------|--------------|
 | **`pantheon`** | Claude itself (independent agents) | Paid Claude Code plan + Workflows (see below) |
-| **`pantheon-x`** | **GPT-5.5 via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (`codex:codex-rescue`) |
-| **`pantheon-custom`** | **whatever you pass** — `verifier`: a Claude tier, `codex`/GPT-5.5, or an external/local model (`deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>` …) | Workflows; pick the model with `/pantheon-model` — **cloud = just an API key** (direct call), local = `codex` CLI + Ollama/LM Studio |
+| **`pantheon-x`** | **GPT-5.6 Sol via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (its `codex-companion.mjs`) + a logged-in `codex` CLI |
+| **`pantheon-custom`** | **whatever you pass** — `verifier`: a Claude tier, `codex`/GPT-5.6 Sol, or an external/local model (`deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>` …) | Workflows; pick the model with `/pantheon-model` — **cloud = just an API key** (direct call), local = `codex` CLI + Ollama/LM Studio |
 
-`pantheon-x` is the stronger setting: the implementation written by Claude is attacked by a *different* model, which shrinks single-model blind spots (the same mistake slipping past a same-model verifier). If you don't have Codex/GPT-5.5, use `pantheon`.
+`pantheon-x` is the stronger setting: the implementation written by Claude is attacked by a *different* model, which shrinks single-model blind spots (the same mistake slipping past a same-model verifier). If you don't have Codex/GPT-5.6 Sol, use `pantheon`.
 
-All three share the same harness (`pantheon-class.js`); they differ only in which model runs the adversarial verify — `pantheon` fixes it to Claude, `pantheon-x` to GPT-5.5, and **`pantheon-custom`** lets you choose per run with a `verifier` arg. Because Claude Code's `agent()` only runs a Claude model or a plugin agent, `pantheon-custom` reaches other vendors out-of-band — a Claude tier natively, GPT-5.5 via the Codex plugin, local models via `codex --oss`, and **cloud providers by calling their `/chat/completions` directly**. You pick the model OpenClaw-style with **`/pantheon-model`** (saved to `~/.pantheon/config.json`); see [Picking the verifier model](#picking-the-verifier-model--pantheon-model) below for the catalog, how each model is reached, and key handling.
+All three share the same harness (`pantheon-class.js`); they differ only in which model runs the adversarial verify — `pantheon` fixes it to Claude, `pantheon-x` to GPT-5.6 Sol, and **`pantheon-custom`** lets you choose per run with a `verifier` arg. Because Claude Code's `agent()` only runs a Claude model or a plugin agent, `pantheon-custom` reaches other vendors out-of-band — a Claude tier natively, GPT-5.6 Sol via the Codex plugin, local models via `codex --oss`, and **cloud providers by calling their `/chat/completions` directly**. You pick the model OpenClaw-style with **`/pantheon-model`** (saved to `~/.pantheon/config.json`); see [Picking the verifier model](#picking-the-verifier-model--pantheon-model) below for the catalog, how each model is reached, and key handling.
 
 ## The review skills (`pantheon-gap` / `pantheon-gap-x` / `pantheon-gap-custom`)
 
@@ -55,10 +55,10 @@ It **reports** gaps; it does not fix them — hand the report to **`pantheon-fix
 | Skill | Adversarial confirm | Requirements |
 |-------|---------------------|--------------|
 | **`pantheon-gap`** | Claude (skeptical agents) | Paid Claude Code plan + Workflows |
-| **`pantheon-gap-x`** | **GPT-5.5 via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (`codex:codex-rescue`) |
-| **`pantheon-gap-custom`** | **whatever you pass** — `verifier`: a Claude tier, `codex`/GPT-5.5, or an external/local model (`deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>` …) | Workflows; pick the model with `/pantheon-model` — **cloud = just an API key** (direct call), local = `codex` CLI + Ollama/LM Studio |
+| **`pantheon-gap-x`** | **GPT-5.6 Sol via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (its `codex-companion.mjs`) + a logged-in `codex` CLI |
+| **`pantheon-gap-custom`** | **whatever you pass** — `verifier`: a Claude tier, `codex`/GPT-5.6 Sol, or an external/local model (`deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>` …) | Workflows; pick the model with `/pantheon-model` — **cloud = just an API key** (direct call), local = `codex` CLI + Ollama/LM Studio |
 
-`pantheon-gap-x` is the review-side equivalent of `pantheon-x`: a *different* model judges each finding, so it strips the Claude probe's "I found a gap" confirmation bias harder. The three share the same harness (`pantheon-gap-class.js`); they differ only in which model runs the confirm step — `pantheon-gap` fixes it to Claude, `pantheon-gap-x` to GPT-5.5, and **`pantheon-gap-custom`** lets you choose per run with a `verifier` arg — including a cross-vendor (cloud) or local model — see [Picking the verifier model](#picking-the-verifier-model--pantheon-model); the confirm step is read-only, so it never writes into the reviewed repo. If you don't have a key / Codex / a local model, use `pantheon-gap` (or `pantheon-gap-custom` with a Claude tier).
+`pantheon-gap-x` is the review-side equivalent of `pantheon-x`: a *different* model judges each finding, so it strips the Claude probe's "I found a gap" confirmation bias harder. The three share the same harness (`pantheon-gap-class.js`); they differ only in which model runs the confirm step — `pantheon-gap` fixes it to Claude, `pantheon-gap-x` to GPT-5.6 Sol, and **`pantheon-gap-custom`** lets you choose per run with a `verifier` arg — including a cross-vendor (cloud) or local model — see [Picking the verifier model](#picking-the-verifier-model--pantheon-model); the confirm step is read-only, so it never writes into the reviewed repo. If you don't have a key / Codex / a local model, use `pantheon-gap` (or `pantheon-gap-custom` with a Claude tier).
 
 ## The fix skills (`pantheon-fix` / `pantheon-fix-x` / `pantheon-fix-custom`)
 
@@ -82,8 +82,8 @@ Baseline ──▶ Plan ──▶ Fix (×N parallel) ──▶ Verify (adversari
 | Skill | Adversarial verifier | Requirements |
 |-------|----------------------|--------------|
 | **`pantheon-fix`** | Claude (skeptical agents) | Paid Claude Code plan + Workflows; the target is a git repo |
-| **`pantheon-fix-x`** | **GPT-5.5 via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (`codex:codex-rescue`) |
-| **`pantheon-fix-custom`** | **whatever you pass** — `verifier`: a Claude tier, `codex`/GPT-5.5, or an external/local model (`deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>` …) | Workflows; pick the model with `/pantheon-model` — **cloud = just an API key** (direct call), local = `codex` CLI + Ollama/LM Studio |
+| **`pantheon-fix-x`** | **GPT-5.6 Sol via Codex plugin** (cross-model) | Above **+** OpenAI Codex plugin (its `codex-companion.mjs`) + a logged-in `codex` CLI |
+| **`pantheon-fix-custom`** | **whatever you pass** — `verifier`: a Claude tier, `codex`/GPT-5.6 Sol, or an external/local model (`deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>` …) | Workflows; pick the model with `/pantheon-model` — **cloud = just an API key** (direct call), local = `codex` CLI + Ollama/LM Studio |
 
 The three share one harness — `pantheon-fix/pantheon-fix-class.js`; `-x` and `-custom` load that *same* file with a different `verifier` (no separate copy, so they can't drift). **One defect per run** keeps each patch minimal and the diff easy to review — for several gaps, run it once each.
 
@@ -98,17 +98,19 @@ The model id is OpenClaw-style **`provider/model-id`** (`anthropic/haiku`, `olla
 | Verifier | How it runs | Setup |
 |----------|-------------|-------|
 | Claude tier (`anthropic/haiku` …) | native `agent({model})` | none |
-| GPT-5.5 (`codex`) | the Codex **plugin** agent (`codex:codex-rescue`) | Codex plugin + ChatGPT/codex login |
+| GPT-5.6 Sol (`codex`) | a shell-out to the Codex plugin's `codex-companion.mjs` (never the `codex-rescue` agent — see below) | Codex plugin + ChatGPT/codex login |
 | Local (`ollama/…`, `lmstudio/…`) | `codex exec --oss --local-provider …` | `codex` CLI + the local server (model pulled) |
 | Cloud (`deepseek`, `qwen`, `gemini` …) | a direct `curl` to the provider's **`/chat/completions`** | the provider's API key — **no codex** |
 
-> **Cloud goes straight to the provider, not through codex.** codex CLI 0.139.0 only speaks the OpenAI *Responses* wire, which chat-only vendors (DeepSeek and most others) don't implement — so the harness calls each cloud provider's OpenAI-compatible `/chat/completions` itself. The external model does the judging; a Claude driver only relays its structured verdict. If a model can't be reached, the run returns an "unavailable" verdict rather than faking a pass.
+> **Cloud goes straight to the provider, not through codex.** the codex CLI only speaks the OpenAI *Responses* wire, which chat-only vendors (DeepSeek and most others) don't implement — so the harness calls each cloud provider's OpenAI-compatible `/chat/completions` itself. The external model does the judging; a Claude driver only relays its structured verdict — and because a chat API has no file access, the driver **inlines the code under review** (implementation + tests, the cited evidence, or the patch) into the request so the external model judges the actual code, not a path string. If a model can't be reached, the run returns an `unavailable` verdict — counted as an abstention, with the variant/gap flagged `unverified`/`unconfirmed` in the result — rather than faking a pass.
 
-**API keys never touch the chat.** For a cloud provider, `/pantheon-model` creates `~/.pantheon/env` (`chmod 600`); you paste the key into that file and the harness sources it at run time. Only the model id in `~/.pantheon/config.json` is non-secret (safe to share/commit). The `providers.json` `base_url`s are best-effort — most are verified reachable on `/chat/completions`; a few (`fireworks`, `sambanova`, `nvidia`) return 404 to an unauthenticated probe and stay unconfirmed until used with a real key.
+**API keys never touch the chat.** For a cloud provider, `/pantheon-model` creates `~/.pantheon/env` (`chmod 600`); you paste the key into that file and the harness reads it at run time (parsed as `KEY=VALUE`, never `source`d). Only the model id in `~/.pantheon/config.json` is non-secret (safe to share/commit). The runtime routing table is **generated from `providers.json`**, so every catalogued provider actually routes — and a `baseUrl` must be HTTPS (or loopback) before a key is sent to it.
 
-> **⚠️ Two rough edges to know (it's a prototype — and the gap harness found these in its *own* repo; see [`benchmarks/comparison.md`](./benchmarks/comparison.md)):**
-> - **For cloud, configure via `/pantheon-model`, not an inline `verifier=`.** The router's built-in provider table is a *subset* of the full `providers.json` catalog, so an inline cloud provider outside that subset can fail to route — and a failed cloud verify fails **open** (returns "no defect"), so the adversarial step is silently skipped. `/pantheon-model` writes the chosen provider's routing block into `~/.pantheon/config.json`, which routes reliably.
-> - **Only put providers you trust into `providers.json` / `config.json`.** A cloud `baseUrl` is **not validated** before the API key is sent to it, so a malicious `baseUrl` would ship your key to that host. These are local files you control — but treat them as secret-adjacent config.
+> **⚠️ Rough edges to know (it's a prototype):**
+> - **Evidence containment is prompt-enforced, not harness-enforced.** When `pantheon-gap-custom` ships cited code to an external provider, the driver agent is *instructed* to `realpath`-check every path against the target and to report what it sent (`filesSent` / `filesSkipped`). A determined prompt injection in a hostile repo could still talk it out of that. Don't point the custom gap skills at a repo you don't trust.
+> - **Some provider endpoints are `"unverified": true`.** Their base URLs come from docs, not from a live call with a real key. A wrong one surfaces as an `unavailable` verdict (an abstention), never a silent pass.
+> - **Only put providers you trust into `providers.json` / `config.json`.** The scheme is validated; the host is whatever you wrote. Treat these as secret-adjacent config.
+> - **Each builder writes its own tests.** So "green" doesn't mean quite the same thing across variants, and the comparison between them isn't as clean as it looks. A planner-owned canonical test set is the fix; it isn't built yet.
 
 ## Requirements
 
@@ -116,14 +118,14 @@ These skills drive Claude Code's **Workflow** orchestration engine, so a stock/F
 
 - **Claude Code ≥ v2.1.154** on a **paid plan** — Pro, Max, Team, or Enterprise (also Bedrock / Vertex / Foundry). **Not available on the Free tier.**
 - On **Pro**, enable it once: `/config` → turn on **Dynamic workflows**.
-- **`pantheon-x` / `pantheon-gap-x` (and the `*-custom` skills *only when you pick* `codex`/`gpt`):** the cross-model verifier/confirmer runs as the `codex:codex-rescue` subagent, which ships in OpenAI's **Codex plugin** — *not* stock Claude Code. A logged-in `codex` CLI alone does **not** register it. (Claude-family `verifier` choices in the `*-custom` skills need none of this.) Install the plugin:
+- **`pantheon-x` / `pantheon-gap-x` / `pantheon-fix-x` (and the `*-custom` skills *only when you pick* `codex`/`gpt`):** the cross-model reviewer is invoked by shelling out to the Codex plugin's `codex-companion.mjs`, which needs a logged-in `codex` CLI. **Do not route this through the `codex:codex-rescue` subagent** — it is a forwarding wrapper whose instruction loses to the StructuredOutput instruction a `schema` injects, so it reviews with its own sonnet and never calls codex, silently. Every verdict now carries a `[codex:<threadId>]` stamp and the run reports `crossModelVerified`; trust that field, not the skill's name. (Claude-family `verifier` choices need none of this.) Install the plugin:
   ```
   /plugin marketplace add openai/codex-plugin-cc
   /plugin install codex@openai-codex
   ```
-  plus a ChatGPT subscription (or `OPENAI_API_KEY`) and the `codex` CLI on PATH. **If `codex:codex-rescue` isn't installed, use `pantheon` / `pantheon-gap` (or a Claude-family `verifier` in the `*-custom` skills) instead** — routing to a missing cross-model agent would otherwise silently skip the adversarial pass and rubber-stamp everything.
+  plus a ChatGPT subscription (or `OPENAI_API_KEY`) and **codex-cli ≥ 0.140** on PATH (older builds reject `gpt-5.6-*` with a 400). **If codex isn't reachable, use `pantheon` / `pantheon-gap` (or a Claude-family `verifier` in the `*-custom` skills) instead.** An `-x` run whose codex calls fail no longer rubber-stamps anything: unstamped verdicts count as abstentions, quorum fails, and the run ends with `insufficient_verifier_quorum` and no winner — safe, but a wasted run.
 - **`pantheon-custom` / `pantheon-gap-custom` non-Claude verifiers** don't need the Codex *plugin*:
-  - **Cloud** (`deepseek`, `qwen`, `gemini`, `groq`, …) is called via a **direct `/chat/completions` request** — you only need that provider's API key (set up by `/pantheon-model` into `~/.pantheon/env`). No codex involved. *(codex CLI 0.139.0 only speaks the OpenAI Responses wire, which chat-only vendors don't implement — so the harness calls them itself.)*
+  - **Cloud** (`deepseek`, `qwen`, `gemini`, `groq`, …) is called via a **direct `/chat/completions` request** — you only need that provider's API key (set up by `/pantheon-model` into `~/.pantheon/env`). No codex involved. *(the codex CLI only speaks the OpenAI Responses wire, which chat-only vendors don't implement — so the harness calls them itself.)*
   - **Local** (`ollama/…`, `lmstudio/…`) uses `codex exec --oss`, so it needs the **`codex` CLI** on PATH and the local server running with the model pulled (no key).
   - See [Picking the verifier model](#picking-the-verifier-model--pantheon-model). If a chosen model can't be reached, the run flags the verdict "unavailable" rather than faking a pass.
 
@@ -157,13 +159,13 @@ In Claude Code:
 
 ```
 /pantheon     <a hard implementation task whose correctness is testable>
-/pantheon-x   <same, but GPT-5.5 does the adversarial verification>
+/pantheon-x   <same, but GPT-5.6 Sol does the adversarial verification>
 /pantheon-custom <same, but YOU pick the verifier model — verifier: deepseek|qwen|kimi|ollama:<m>|opus|sonnet|codex>
 /pantheon-gap   <path to an existing project>   # gap analysis / feedback review, not generation
-/pantheon-gap-x <same, but GPT-5.5 (Codex) does the adversarial confirm>
+/pantheon-gap-x <same, but GPT-5.6 Sol (Codex) does the adversarial confirm>
 /pantheon-gap-custom <same, but YOU pick the confirm model — verifier: deepseek|qwen|kimi|ollama:<m>|opus|sonnet|codex>
 /pantheon-fix        <repo + a defect/gap>   # patch an existing bug safely (worktree-isolated, regression-gated, diff-only)
-/pantheon-fix-x      <same, but GPT-5.5 (Codex) tries to break each fix>
+/pantheon-fix-x      <same, but GPT-5.6 Sol (Codex) tries to break each fix>
 /pantheon-fix-custom <same, but YOU pick the verifier model — verifier: deepseek|qwen|kimi|ollama:<m>|opus|sonnet|codex>
 /pantheon-model      <pick/configure the verifier model the *-custom skills use (OpenClaw-style setup; handles API keys)>
 ```
@@ -191,7 +193,7 @@ Claude collects the parameters (`task`, `workdir`, `lang` + test command, `varia
 | `lang` | Python/unittest | language **+ the exact test command** for your stack |
 | `variants` | 3 | bump to 5 for harder problems |
 | `verifiers` | 2 | bump to 3 to be stricter (majority refutation drops a build) |
-| `crossModelVerify` | `false` (`pantheon`) / `true` (`pantheon-x`) | route adversarial verify to GPT-5.5/Codex |
+| `crossModelVerify` | `false` (`pantheon`) / `true` (`pantheon-x`) | route adversarial verify to GPT-5.6 Sol/Codex |
 | `verifier` | `~/.pantheon/config.json` default, else Claude (`*-custom` only) | the adversarial model: a Claude tier (`opus`/`sonnet`/`haiku`/`fable`), `codex`/`gpt` (Codex plugin), or an external/local model via the `codex` CLI — `deepseek`, `qwen`, `kimi`, `ollama:<m>`, `profile:<name>`, or **OpenClaw-style `provider/model-id`** (`ollama/qwen2.5:7b`, `deepseek/deepseek-chat`, `openrouter/qwen/...`). Set a persistent default in `~/.pantheon/config.json`; first run onboards you. |
 | `repo` | — | **`pantheon-fix*` only** — absolute path to the **git** repo to patch (gen/review use `workdir` instead) |
 | `gap` | — | **`pantheon-fix*` only** — the defect to fix: a precise description, or a gap pasted from `pantheon-gap` (one defect per run) |
@@ -211,7 +213,7 @@ Claude collects the parameters (`task`, `workdir`, `lang` + test command, `varia
 There's no model change — it's orchestration, yes. The non-trivial part is the *adversarial* step: an independent agent (a different model in `pantheon-x`) whose job is to break a build rather than confirm it. That's what catches defects the builder's own green tests rubber-stamp. The value is the harness shape, not a secret prompt.
 
 **Do you have benchmarks vs. plain Opus?**
-No formal benchmark yet — treat the description as *mechanism*, not a measured delta. The value is in the adversarial step: a build can pass its own tests and still be wrong, and an independent reviewer catches what the self-written tests rubber-stamp. There's an illustrative run in [`benchmarks/comparison.md`](./benchmarks/comparison.md) — the same task/review through three verifier models (Claude / GPT-5.5 / DeepSeek). It's **not** a clean benchmark (the generation task was too easy to break, and the review runs hit a rate-limit), but pointed at its own repo the gap harness surfaced real, specific defects in *this* project — the more honest demonstration. If you run a proper head-to-head, I'd genuinely like to see the numbers.
+No formal benchmark yet — treat the description as *mechanism*, not a measured delta. The value is in the adversarial step: a build can pass its own tests and still be wrong, and an independent reviewer catches what the self-written tests rubber-stamp. There's an illustrative run in [`benchmarks/comparison.md`](./benchmarks/comparison.md) — the same task/review through three verifier models (Claude / GPT-5.6 Sol / DeepSeek). It's **not** a clean benchmark (the generation task was too easy to break, and the review runs hit a rate-limit), but pointed at its own repo the gap harness surfaced real, specific defects in *this* project — the more honest demonstration. If you run a proper head-to-head, I'd genuinely like to see the numbers.
 
 **What does a run cost?**
 A few hundred K to ~1M tokens and ~6–10 min at default settings; more for `variants=5` / `verifiers=3` / cross-model. It's meant for the hardest 10–20% of tasks, not everyday edits. See [Cost & scope](#cost--scope).
@@ -219,8 +221,98 @@ A few hundred K to ~1M tokens and ~6–10 min at default settings; more for `var
 **It says "Workflow tool not found" / nothing happens.**
 You're likely on the Free tier, or haven't enabled workflows. See [Requirements](#requirements) — needs a paid plan and, on Pro, `/config` → **Dynamic workflows**.
 
-**Why route verification to GPT-5.5 / another vendor's model?**
+**Why route verification to GPT-5.6 Sol / another vendor's model?**
 Same-model verifiers share blind spots — a mistake the builder makes, a same-model reviewer tends to miss too. A *different* model is a cheap way to break that correlation. It's optional: `pantheon` runs Claude-on-Claude and still helps.
+
+## Cross-model verification: how `-x` actually works
+
+The `-x` skills claim a *different vendor's* model attacks what Claude wrote. That claim is only worth
+something if it's true, so the harness proves it rather than asserting it.
+
+**Do not route the adversarial step through `agentType: 'codex:codex-rescue'`.** That agent is a thin
+forwarding wrapper (`model: sonnet`, *"forward the request, do nothing else"*) — but these harnesses pass
+a `schema`, and the StructuredOutput instruction the Workflow tool injects **beats** the forwarding
+instruction. The wrapper then reviews the code with its own sonnet model and **never invokes codex at
+all.** It fails silently: verdicts come back plausible and confident, `unavailable` is never set, and the
+run reports itself as cross-verified when it was Claude judging Claude — with a *weaker* model than the
+base skills, which inherit the main-loop model. A real run measured **1 of 84** reviewers actually
+reaching codex. It also invalidated this repo's own
+[cross-model benchmark](./benchmarks/tetmux-cross-model.md), which is now retracted.
+
+So instead:
+
+1. The reviewer agent is a **transcriber**, not a reviewer. It shells out to the Codex plugin's
+   `codex-companion.mjs` with the model pinned, and is forbidden from forming its own opinion.
+2. Every genuine verdict is stamped `[codex:<threadId>]` with the real thread id from that call. The
+   audit matches the **full UUID shape**, so a transcriber can't satisfy it by inventing the marker.
+3. **An unstamped verdict counts as an abstention** — however confident it reads. With no real verdicts,
+   quorum can't be met, and the run ends in `insufficient_verifier_quorum` with **no winner** rather than
+   shipping a same-model result wearing an `-x` label.
+4. Every run reports `crossModelVerified` and `verdictProvenance: {total, fromCodex, pct}`.
+
+**Trust that field, not the skill's name.** A healthy run looks like:
+
+```
+✅ Cross-model verified: 56/56 verdicts came from GPT-5.6 Sol (Codex).
+   crossModelVerified: true,  verdictProvenance: { total: 56, fromCodex: 56, pct: 100 }
+```
+
+## Does the fail-closed gate actually matter?
+
+It fired on its first real job. `pantheon-fix-x` was pointed at a live anti-cheat bypass in a running
+app — a defect whose reviewer-suggested fix was, on paper, one word. Across two rounds it built six
+candidate fixes. Every one passed its own repro test and regressed nothing. **The adversarial
+reviewers broke all six**, each time with a failing case they had actually run:
+
+| # | What broke the candidate |
+|---|---|
+| 1 | The naive fix bans honest runners (re-opens a false positive an earlier commit had closed) |
+| 2 | Despiking deletes the very evidence the fix was preserving |
+| 3 | The threshold false-positives on Android's integer-second timestamps |
+| 4 | Neutralizing that re-breaks spike detection |
+| 5 | The detector *sorts by timestamp*, so backward-timestamp evidence never survives to be checked |
+| 6 | The threshold is per-segment, so a cheater just splits the jump in two |
+
+The old harness would have shipped one of them — it had a fallback that crowned the "best of" a fully
+refuted field, and `apply: true` would have written it to the working tree. The current one returns
+`all_candidates_refuted`, offers **no patch**, and hands back a precise, empirically-verified account
+of why every approach fails. That's the whole product: a harness that refuses is worth more than one
+that guesses.
+
+## How the safety gates work
+
+The whole point of a harness is that it refuses to hand you something it couldn't verify. Three rules
+make that true, and `test/gates.test.js` locks each one in:
+
+- **Fail-closed gates.** If no variant goes green, if no fix makes its repro test pass, or if the
+  reviewers break every candidate, the run returns a structured **no-winner** result and offers
+  nothing. There is no "least-bad candidate" fallback. (There used to be — and
+  [the benchmark](./benchmarks/tetmux-cross-model.md) caught it crowning a patch all three reviewers
+  had refuted.)
+- **A tie refutes.** With two reviewers, one confirmed defect is enough to drop a candidate. For an
+  admission gate the tie has to break *against* the thing being admitted. Note the gap skills
+  deliberately invert this — there a tie *keeps* the finding, so a split vote never silently discards
+  a probe's work.
+- **Quorum.** A reviewer that couldn't run (dead agent, missing key, non-200) **abstains** — it is
+  never counted as "found no defect". At least `floor(V/2)+1` reviewers must return a real verdict or
+  the candidate is `unverified` and cannot win. So `verifiers: 2` tolerates no failures; use
+  `verifiers: 3` to survive one. A completely dead verifier fleet yields `insufficient_verifier_quorum`,
+  not a silent pass.
+
+## Contributing
+
+The harness logic is physically duplicated into 7 self-contained workflow scripts, because the
+Workflow tool runs each one with no imports. **Don't edit those copies.** The source of truth is
+[`lib/gates.js`](./lib/gates.js) (gates, voting, verifier routing) and
+[`providers.json`](./providers.json) (the provider catalog, which *generates* the runtime routing
+tables). After changing either:
+
+```bash
+npm run inline    # propagate into the 7 workflow scripts
+npm run check     # drift check + unit tests + workflow-script parse + skill-manifest lint
+```
+
+CI runs `npm run check` and fails on drift, so the copies cannot silently diverge.
 
 ## Status
 

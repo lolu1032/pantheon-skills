@@ -1,10 +1,40 @@
 # Benchmark: cross-model (`-x`) variants on a real Go TUI feature
 
+> # 🚨 RETRACTED: this benchmark did not measure what it claims
+>
+> **The cross-model comparison is void.** Every `-x` run below routed its adversarial step through
+> `agentType: 'codex:codex-rescue'`. That agent is a thin forwarding wrapper (`model: sonnet`) — and
+> because these harnesses pass a `schema`, the StructuredOutput instruction the Workflow tool injects
+> beats the wrapper's "forward, do nothing else" instruction. **The wrapper reviewed the code with its
+> own sonnet model and never invoked codex at all.** It failed silently: verdicts came back plausible,
+> `unavailable` was never set, and the run reported itself as cross-verified. A later run measured
+> **1 of 84** confirm agents actually reaching codex.
+>
+> These runs are dated 2026-06-23. The fix (an explicit shell-out to the codex companion, plus a
+> `[codex:<threadId>]` provenance stamp that is audited) landed 2026-07-10 — **17 days later.** So
+> every verdict labelled "GPT-5.5 (Codex)" below was almost certainly **sonnet**. The `-x` variants
+> were not cross-model; they were Claude judging Claude with a *weaker* model than the base skills,
+> which inherit the main-loop model.
+>
+> **A second bug compounds it.** The gates were **fail-open**: if the reviewers refuted *every*
+> candidate, the harness recycled them and crowned one anyway. §3 is a live recording of that firing —
+> all three fixes refuted, v0 declared winner ("refuted — but best of 3"). Under the current harness
+> that run yields `all_candidates_refuted` and **no winner at all**.
+>
+> **What survives:** the *defects* found are real (they were confirmed against the code), and the
+> mechanism "an independent reviewer broke a patch the judge had blessed" did happen — it just wasn't
+> a *different vendor's* model doing the breaking. Any claim in this document about cross-model value,
+> vendor independence, or GPT-vs-Claude behavior is unsupported.
+>
+> Both bugs are fixed and locked in by `test/gates.test.js`. **This benchmark needs to be re-run from
+> scratch on the fixed harness before any number in it is cited.**
+
 **Project:** tetmux — a Go terminal multiplexer (bubbletea + PTY + a vendored vt10x emulator).
 **Task chain:** add a cmux-style mouse drag-to-resize divider, then review it, then fix the findings.
-**Method:** every base/`-x` pair ran on identical inputs in isolated repo copies (the real repo was untouched until a winner was synthesized). `-x` routes the adversarial step to GPT-5.5 (Codex); base keeps it on Claude. One vendor's model attacking another's code is the only intended variable.
+**Method:** every base/`-x` pair ran on identical inputs in isolated repo copies (the real repo was untouched until a winner was synthesized). `-x` routes the adversarial step to Codex; base keeps it on Claude. One vendor's model attacking another's code is the only intended variable.
 
 > **How to read this.** Single trial per stage, so treat the *mechanisms* as the takeaway and the exact counts as one sample. The cleanest verifier-isolating result is the **fix** stage (§3); §1 and §2 surface real defects but don't fully isolate the verifier as the cause (see each takeaway). Caveats are called out inline and in the Bottom line.
+
 
 ---
 

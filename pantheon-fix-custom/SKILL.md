@@ -6,12 +6,12 @@ description: >-
   models like DeepSeek, Qwen, Kimi, or a local Ollama/LM Studio model). Same baseline → plan → N
   isolated-worktree fixes (regression-gated + repro-gated) → adversarial verify → judge-picks-the-
   minimal-patch pipeline as pantheon-fix, but the model that tries to BREAK each fix is chosen per run
-  via a `verifier` argument. Outputs a diff; doesn't touch your working tree unless apply:true. Use when
+  via a `verifier` argument. Outputs a diff; doesn't touch your tree unless apply:true. Use when
   the user says "pantheon fix custom", "fix and verify with deepseek/qwen", "have a local model check my
   fix", "외부 모델로 검증해서 고쳐", "딥시크로 패치 검증", "오픈클로처럼 검증 모델 골라서 고쳐". If no
   model is given it defaults to Claude (= pantheon-fix). For the fixed presets use pantheon-fix (Claude)
-  / pantheon-fix-x (GPT-5.5). Configure the model with /pantheon-model. To FIND gaps (not fix) use
-  pantheon-gap-custom. Don't use for a trivial one-line edit (cost is high).
+  / pantheon-fix-x (GPT-5.6 Sol). Configure the model with /pantheon-model. To FIND gaps use
+  pantheon-gap-custom. Don't use for a trivial one-line edit.
 ---
 
 # Pantheon fix harness (configurable · user-selectable verifier model)
@@ -19,7 +19,7 @@ description: >-
 Identical to **`pantheon-fix`** — baseline → plan → N candidate fixes in isolated `git worktrees`
 (regression-gated + repro-gated) → adversarial verify → judge picks the minimal safe patch, diff-only
 unless `apply: true` — **except you pick which AI model runs the adversarial-verify step per run**.
-`pantheon-fix` always uses Claude; `pantheon-fix-x` always uses GPT-5.5. This one points the verifier
+`pantheon-fix` always uses Claude; `pantheon-fix-x` always uses GPT-5.6 Sol. This one points the verifier
 at **any model the harness can reach** — DeepSeek, Qwen, Kimi, a local Ollama/LM Studio model, your own
 provider, or a Claude tier.
 
@@ -34,27 +34,29 @@ OpenClaw-style, and sets up any API key in a file — never in chat), or name on
 |------------------|----------------------------|--------------|
 | omitted / `claude` | Claude (session model) — same as `pantheon-fix` | none |
 | `opus` / `sonnet` / `haiku` / `fable` | that Claude tier | none |
-| `codex` / `gpt` | GPT-5.5, via the Codex **plugin** (`codex:codex-rescue`) | Codex plugin |
+| `codex` / `gpt` | GPT-5.6 Sol, via a shell-out to the Codex plugin's `codex-companion.mjs` | Codex plugin + `codex` login |
 | `deepseek` | DeepSeek (`deepseek-chat`) | `DEEPSEEK_API_KEY` |
-| `qwen` | Qwen2.5-Coder via OpenRouter | `OPENROUTER_API_KEY` |
+| `qwen` | Qwen2.5-Coder via Alibaba DashScope | `DASHSCOPE_API_KEY` |
 | `kimi` | Kimi / Moonshot | `MOONSHOT_API_KEY` |
 | `ollama:<model>` / `lmstudio:<model>` | a **local** model | `codex` CLI + local server running |
 | `profile:<name>` / `model:<name>` | a codex profile / model id | `codex` CLI configured |
 
 Cloud providers are called directly via their `/chat/completions` endpoint; local/profile models go
-through `codex exec`; Claude tiers and GPT-5.5 (plugin) run natively.
+through `codex exec`; Claude tiers and GPT-5.6 Sol (plugin) run natively.
 
 ## Requirements
 - Everything `pantheon-fix` needs (Workflow on a paid plan; the target is a git repo), **plus** whatever
   the chosen verifier needs:
   - Claude tiers (`opus`/`sonnet`/`haiku`/`fable`) → nothing extra.
-  - `codex`/`gpt` → the `codex:codex-rescue` agent (Codex plugin).
+  - `codex`/`gpt` → the Codex plugin's `codex-companion.mjs` + a logged-in `codex` CLI.
   - Cloud (`deepseek`/`qwen`/`kimi`/…) → the matching `*_API_KEY` (in `~/.pantheon/env`, which the
     harness sources; set it up via `/pantheon-model`).
   - Local (`ollama:`/`lmstudio:`) → `codex` CLI on PATH + the local server up with the model pulled.
 - **If the chosen verifier can't actually run** (key unset, model unreachable, codex missing), the
-  driver returns a no-defect verdict tagged "external verifier unavailable" rather than fabricating one
-  — so a fix won't be falsely broken, but verification didn't really happen. Check availability first.
+  driver returns a verdict marked `unavailable: true` instead of fabricating one. The harness counts it
+  as an ABSTENTION, and a fix with zero real verdicts is flagged `unverified` in the result — so a fix
+  cannot win — the run ends with `insufficient_verifier_quorum` and no patch. Call out `unverified` fixes
+  when reporting. Check availability first.
 
 ## Procedure (when this skill triggers)
 1. **Resolve the verifier:**

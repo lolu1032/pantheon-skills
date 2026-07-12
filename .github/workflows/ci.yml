@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The harness logic is physically duplicated into 7 self-contained workflow scripts (the
+      # Workflow tool cannot import). This is what stops those copies from drifting apart — and
+      # from drifting away from providers.json, which generates the routing tables.
+      - name: Harness logic is in sync with lib/gates.js
+        run: npm run inline:check
+
+      - name: Unit tests (vote, quorum, gates, routing, catalog)
+        run: npm test
+
+      # Every workflow file must be parseable in the exact form the Workflow tool runs it: an async
+      # function body with `agent`/`parallel`/`log`/... injected. A syntax error here is a run that
+      # dies after the plan phase has already been paid for.
+      - name: Workflow scripts parse
+        run: node scripts/check-syntax.js
+
+      - name: Skill manifests are valid
+        run: node scripts/check-skills.js
