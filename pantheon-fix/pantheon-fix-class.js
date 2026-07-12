@@ -192,6 +192,23 @@ function selectFixPool(fixes, testable) {
   return { pool: [], outcome: 'no_non_regressing_fix' }
 }
 
+// Fold an independent test audit over a fixer's SELF-REPORTED result. Never gate on a number the
+// fixer produced about its own work: a real run turned up six fixes that each passed the repro test
+// they wrote themselves, and the adversarial reviewers broke all six. The audit re-writes the
+// canonical test from the planner's copy and re-runs the suite; its observation wins. A fix whose
+// audit never ran is UNAUDITED, and an unaudited fix is not a candidate — same reasoning as quorum.
+function applyAudit(fix, audit) {
+  if (!audit) return { ...fix, regressed: true, auditFailed: true }
+  return {
+    ...fix,
+    reproPasses: audit.reproPasses,
+    regressed: audit.regressed,
+    testWasTampered: Boolean(audit.testWasTampered),
+    selfReportMismatch: fix.reproPasses !== audit.reproPasses || fix.regressed !== audit.regressed,
+    auditFailed: false,
+  }
+}
+
 // A candidate may win only if a real adversarial vote reached quorum AND did not refute it.
 function selectCandidates(verified) {
   const scored = verified.filter(Boolean)
@@ -360,7 +377,9 @@ const PLAN_SCHEMA = {
     bugSpec: { type: 'string', description: 'Precise restatement of the defect and the correct behavior' },
     testCommand: { type: 'string' },
     testable: { type: 'boolean', description: 'Can this defect be reproduced by an automated test?' },
-    reproPlan: { type: 'string', description: 'How to write a failing test that reproduces it; or why it is not testable' },
+    reproPlan: { type: 'string', description: 'How the repro test works; or why the defect is not testable' },
+    reproTestPath: { type: 'string', description: 'Path (relative to the repo root) of the canonical repro test file. Required when testable.' },
+    reproTestContent: { type: 'string', description: 'The COMPLETE contents of the canonical repro test file, verbatim and runnable. Required when testable. Every variant runs THIS EXACT file — it is the shared, fixed definition of "fixed".' },
     filesLikelyTouched: { type: 'array', items: { type: 'string' } },
     strategies: {
       type: 'array',
@@ -454,7 +473,12 @@ const plan = await agent(
   `You are the PLANNER in a Pantheon fix harness. Target repo: ${repo}\nTest command: \`${testCmd}\`\n\n` +
     `DEFECT / GAP TO FIX:\n${gap}\n\n` +
     `Read the ACTUAL relevant code in the repo (do not speculate). Produce: (1) a precise bugSpec (the defect + the correct behavior), ` +
-    `(2) whether it is testable (can a small automated test reproduce it before the fix and pass after?), (3) a reproPlan (exactly how to write that failing test, which test file, or why it is not testable — e.g. docs/config drift), ` +
+    `(2) whether it is testable (can a small automated test reproduce it before the fix and pass after?), ` +
+    `(3) if testable, WRITE THE CANONICAL REPRO TEST YOURSELF — the complete contents of a new test file (reproTestContent) and where it goes (reproTestPath). ` +
+    `This one file is the shared, fixed definition of "fixed": every variant will run THIS EXACT file and none of them may edit it, so it must be strong enough that a fix which only papers over the symptom still fails. ` +
+    `Cover the defect AND the nearby cases a lazy fix would miss (adjacent inputs, the inverse direction, the obvious bypass). ` +
+    `CONFIRM IT FAILS AT HEAD: write it into a scratch copy, run it, and check it fails for the RIGHT reason (the defect) — not an import error or a typo. If it passes at HEAD, it does not reproduce the bug; fix the test. Also give a short reproPlan explaining what it asserts, ` +
+    `or set testable=false and explain why (e.g. docs/config drift), ` +
     `(4) the files likely to change, and (5) exactly ${N} DISTINCT fix strategies (different approaches, not cosmetic variations of one). Keep each fix minimal in scope.`,
   { schema: PLAN_SCHEMA, phase: 'Plan', label: 'plan' },
 )
@@ -477,8 +501,17 @@ const wtRoot = baseline.workspaceRoot
 const strategies = plan.strategies.slice(0, N).map((s, i) => ({ s, i, wt: `${wtRoot}/v${i}` }))
 const expectedWorktrees = strategies.map((x) => x.wt)
 
-const reproClause = plan.testable
-  ? `2. Write the repro test described here into the right test file:\n${plan.reproPlan}\n   Run the suite and CONFIRM this new test FAILS first (it must reproduce the bug).`
+// The planner owns the repro test; the fixer may not touch it. Letting each variant write its own
+// meant every variant graded its own homework — and a real run produced six fixes that each passed
+// their own repro test while the adversarial reviewers broke all six. A shared, fixed test also makes
+// "green" mean the same thing across variants, so comparing them is finally meaningful.
+const canonicalTest = plan.testable && plan.reproTestContent && plan.reproTestPath
+const reproClause = canonicalTest
+  ? `2. CANONICAL REPRO TEST — write this file EXACTLY as given, byte for byte, and then treat it as READ-ONLY:\n` +
+    `   PATH: ${plan.reproTestPath}\n` +
+    `   <<<CANONICAL_TEST\n${plan.reproTestContent}\nCANONICAL_TEST\n` +
+    `   Run the suite and confirm it FAILS (it reproduces the bug). You may NOT edit, weaken, delete, skip or rename this file, and you may NOT special-case it from the code under test. ` +
+    `Make it pass by fixing the actual defect. An independent check re-writes this file from the original and re-runs the suite, so editing it only wastes your run.`
   : `2. This defect is NOT automatically testable (${plan.reproPlan || 'no repro test possible'}). Skip the repro test; you will rely on the suite staying green plus a manual argument that the fix is correct. Set reproPasses=false.`
 
 // Patch excerpt for review prompts — mark truncation explicitly instead of cutting silently.
@@ -556,7 +589,7 @@ try {
       ),
     ),
   )
-  const fixes = built.filter(Boolean).filter((f) => {
+  let fixes = built.filter(Boolean).filter((f) => {
     // A fixer that worked somewhere other than the path it was given is not a trustworthy candidate:
     // its patch and the worktree the reviewers will read may not be the same tree.
     if (expectedWorktrees.includes(f.worktree)) return true
@@ -564,8 +597,57 @@ try {
     return false
   })
 
-  const fixesReport = fixes.map((f) => ({ variant: f.variant, strategy: f.strategy, regressed: f.regressed, reproPasses: f.reproPasses, linesChanged: f.linesChanged }))
-  const planReport = { bugSpec: plan.bugSpec, testable: plan.testable, strategies: plan.strategies.map((s) => s.name) }
+  // AUDIT: never gate on a number the fixer reported about its own work. A separate agent restores
+  // the canonical test file from the planner's copy (undoing any tampering), re-runs the full suite,
+  // and reports what it actually observed. These values — not the fixer's — feed the gate.
+  const audited = canonicalTest
+    ? await parallel(
+        fixes.map((f) => () =>
+          agent(
+            `You are the TEST AUDITOR for variant ${f.variant}. Do NOT fix anything and do NOT judge the code — you only re-establish the ground truth and report it.\n\n` +
+              `1. cd ${f.worktree}\n` +
+              `2. OVERWRITE ${plan.reproTestPath} with EXACTLY this content (the canonical test; the fixer was told not to touch it, but verify rather than trust):\n` +
+              `<<<CANONICAL_TEST\n${plan.reproTestContent}\nCANONICAL_TEST\n` +
+              `   Report testWasTampered=true if what was there differed in any way beyond whitespace.\n` +
+              `3. Run the FULL suite: \`${testCmd}\`\n` +
+              `4. Report, from what you actually observed: reproPasses (does the canonical repro test pass now?), regressed (does any test that passes at HEAD now fail?), suiteTotal/suitePassing.\n` +
+              `Report honestly even if it contradicts the fixer — that is the entire point of this step.`,
+            {
+              schema: {
+                type: 'object',
+                properties: {
+                  variant: { type: 'number' },
+                  reproPasses: { type: 'boolean' },
+                  regressed: { type: 'boolean' },
+                  testWasTampered: { type: 'boolean' },
+                  suiteTotal: { type: 'number' },
+                  suitePassing: { type: 'number' },
+                  notes: { type: 'string' },
+                },
+                required: ['variant', 'reproPasses', 'regressed'],
+              },
+              phase: 'Fix',
+              label: `audit:v${f.variant}`,
+            },
+          ).then((a) => ({ f, a })),
+        ),
+      )
+    : []
+
+  // Fold the audit back in. A variant whose audit died is UNAUDITED — and an unaudited fix is not a
+  // candidate, for the same reason an unverified one isn't.
+  if (canonicalTest) {
+    const byVariant = new Map(audited.filter(Boolean).map(({ f, a }) => [f.variant, a]))
+    fixes = fixes.map((f) => applyAudit(f, byVariant.get(f.variant) ?? null))
+    for (const f of fixes) {
+      if (f.auditFailed) log(`⚠️ v${f.variant}: the test audit did not run — dropped (an unaudited fix cannot be trusted).`)
+      if (f.testWasTampered) log(`🚨 v${f.variant} EDITED THE CANONICAL TEST. Restored it and re-ran; the restored result is what counts.`)
+      if (f.selfReportMismatch) log(`⚠️ v${f.variant} self-report contradicted the audit. Using the audit: repro=${f.reproPasses} regressed=${f.regressed}.`)
+    }
+  }
+
+  const fixesReport = fixes.map((f) => ({ variant: f.variant, strategy: f.strategy, regressed: f.regressed, reproPasses: f.reproPasses, linesChanged: f.linesChanged, testWasTampered: f.testWasTampered ?? false, auditFailed: f.auditFailed ?? false }))
+  const planReport = { bugSpec: plan.bugSpec, testable: plan.testable, canonicalTest: canonicalTest ? plan.reproTestPath : null, strategies: plan.strategies.map((s) => s.name) }
   const baseReport = { green: baseline.green, passing: baseline.passing, total: baseline.total, testCommand: testCmd }
   // `prov` is passed once the verify phase has run; before that there is nothing to audit.
   const noWinner = (outcome, prov) => ({

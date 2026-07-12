@@ -189,6 +189,23 @@ function selectFixPool(fixes, testable) {
   return { pool: [], outcome: 'no_non_regressing_fix' }
 }
 
+// Fold an independent test audit over a fixer's SELF-REPORTED result. Never gate on a number the
+// fixer produced about its own work: a real run turned up six fixes that each passed the repro test
+// they wrote themselves, and the adversarial reviewers broke all six. The audit re-writes the
+// canonical test from the planner's copy and re-runs the suite; its observation wins. A fix whose
+// audit never ran is UNAUDITED, and an unaudited fix is not a candidate — same reasoning as quorum.
+function applyAudit(fix, audit) {
+  if (!audit) return { ...fix, regressed: true, auditFailed: true }
+  return {
+    ...fix,
+    reproPasses: audit.reproPasses,
+    regressed: audit.regressed,
+    testWasTampered: Boolean(audit.testWasTampered),
+    selfReportMismatch: fix.reproPasses !== audit.reproPasses || fix.regressed !== audit.regressed,
+    auditFailed: false,
+  }
+}
+
 // A candidate may win only if a real adversarial vote reached quorum AND did not refute it.
 function selectCandidates(verified) {
   const scored = verified.filter(Boolean)

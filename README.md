@@ -110,7 +110,7 @@ The model id is OpenClaw-style **`provider/model-id`** (`anthropic/haiku`, `olla
 > - **Evidence containment is prompt-enforced, not harness-enforced.** When `pantheon-gap-custom` ships cited code to an external provider, the driver agent is *instructed* to `realpath`-check every path against the target and to report what it sent (`filesSent` / `filesSkipped`). A determined prompt injection in a hostile repo could still talk it out of that. Don't point the custom gap skills at a repo you don't trust.
 > - **Some provider endpoints are `"unverified": true`.** Their base URLs come from docs, not from a live call with a real key. A wrong one surfaces as an `unavailable` verdict (an abstention), never a silent pass.
 > - **Only put providers you trust into `providers.json` / `config.json`.** The scheme is validated; the host is whatever you wrote. Treat these as secret-adjacent config.
-> - **Each builder writes its own tests.** So "green" doesn't mean quite the same thing across variants, and the comparison between them isn't as clean as it looks. A planner-owned canonical test set is the fix; it isn't built yet.
+> - **The generation skills still let each builder write its own tests**, so "green" doesn't mean quite the same thing across variants there. `pantheon-fix` no longer has this problem (see below); porting the same canonical-test model to generation is the next step.
 
 ## Requirements
 
@@ -278,6 +278,25 @@ refuted field, and `apply: true` would have written it to the working tree. The 
 `all_candidates_refuted`, offers **no patch**, and hands back a precise, empirically-verified account
 of why every approach fails. That's the whole product: a harness that refuses is worth more than one
 that guesses.
+
+## A fixer may not grade its own homework
+
+`pantheon-fix` used to let each variant write its own repro test. That sounds harmless until you watch
+it fail: pointed at a real anti-cheat bypass, six candidates across two rounds each wrote a repro test,
+each made it pass, and the adversarial reviewers broke **all six**. Every one had written a test just
+weak enough to be satisfied by the fix it happened to produce.
+
+So the test moved out of the fixer's hands:
+
+1. **The planner owns the canonical repro test** — it writes the complete test file, proves it fails at
+   HEAD for the *right* reason, and is told to cover the bypasses a lazy fix would miss.
+2. **Every variant runs that same file**, verbatim, and is forbidden from editing, weakening, skipping
+   or special-casing it. "Green" now means the same thing across variants, so comparing them finally
+   means something.
+3. **An independent auditor re-writes the canonical test from the planner's copy and re-runs the suite.**
+   Its observation — not the fixer's self-report — is what the gate sees. Tampering is detected and
+   reported; a variant whose audit didn't run is `unaudited` and cannot win, for the same reason an
+   unverified one can't.
 
 ## How the safety gates work
 

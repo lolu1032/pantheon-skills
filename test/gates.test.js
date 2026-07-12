@@ -10,6 +10,7 @@ import {
   tallyGapVerdicts,
   selectBuildPool,
   selectFixPool,
+  applyAudit,
   selectCandidates,
   bucketGaps,
   outcomeReason,
@@ -180,6 +181,44 @@ test('for a non-testable defect, not regressing is the whole bar', () => {
   const r = selectFixPool([{ variant: 0, regressed: false, reproPasses: false }], false)
   assert.equal(r.outcome, 'ok')
   assert.equal(r.pool.length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// test audit — a fixer may not grade its own homework
+// ---------------------------------------------------------------------------
+test('the audit overrides a fixer that self-reported a passing repro test', () => {
+  // The live run that motivated this: six fixes, each passing the repro test IT wrote, all six broken.
+  const claimed = { variant: 0, reproPasses: true, regressed: false }
+  const observed = { reproPasses: false, regressed: false }
+  const r = applyAudit(claimed, observed)
+  assert.equal(r.reproPasses, false, "the audit's observation wins, not the fixer's claim")
+  assert.equal(r.selfReportMismatch, true)
+  assert.equal(selectFixPool([r], true).outcome, 'no_repro_passing_fix')
+})
+
+test('the audit catches a regression the fixer did not report', () => {
+  const r = applyAudit({ variant: 0, reproPasses: true, regressed: false }, { reproPasses: true, regressed: true })
+  assert.equal(r.regressed, true)
+  assert.equal(selectFixPool([r], true).outcome, 'no_non_regressing_fix')
+})
+
+test('a tampered canonical test is recorded, and the restored result is what counts', () => {
+  const r = applyAudit({ variant: 0, reproPasses: true, regressed: false }, { reproPasses: false, regressed: false, testWasTampered: true })
+  assert.equal(r.testWasTampered, true)
+  assert.equal(r.reproPasses, false, 'the fix only passed because it had weakened the test')
+})
+
+test('an UNAUDITED fix cannot win', () => {
+  const r = applyAudit({ variant: 0, reproPasses: true, regressed: false }, null)
+  assert.equal(r.auditFailed, true)
+  assert.equal(r.regressed, true, 'it must fail the gate rather than coast on its own word')
+  assert.deepEqual(selectFixPool([r], true).pool, [])
+})
+
+test('an honest fixer is confirmed, not punished', () => {
+  const r = applyAudit({ variant: 0, reproPasses: true, regressed: false }, { reproPasses: true, regressed: false })
+  assert.equal(r.selfReportMismatch, false)
+  assert.equal(selectFixPool([r], true).outcome, 'ok')
 })
 
 // ---------------------------------------------------------------------------
