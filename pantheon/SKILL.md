@@ -2,13 +2,13 @@
 name: pantheon
 description: >-
   A skill that runs a hard, testable coding task through a multi-agent harness instead of a single
-  model pass (base variant, no external model needed). It takes implementations, large refactors, or
-  migrations whose correctness can be expressed as tests and runs them through plan → parallel
+  model pass (base variant, no external model needed). It takes self-contained implementations whose correctness can be
+  expressed as tests and runs them through plan → parallel
   variants (with a test-driven self-correction loop) → adversarial verification (Claude itself) →
   synthesis, raising correctness over a single pass. Works on Claude Code's Workflow orchestration
   alone. Use when the user says "pantheon", "run it through pantheon", "build several variants, gate
   on tests, then adversarially verify", "really hammer this implementation", or wants to solve a hard
-  coding/agentic task with multiple agents. For cross-model (GPT-5.5) adversarial verification, use
+  coding/agentic task with multiple agents. For cross-model (GPT-5.6 Sol) adversarial verification, use
   the pantheon-x skill instead. Don't use for easy one-shot questions or trivial edits (cost is high).
 ---
 
@@ -21,7 +21,7 @@ proven techniques (best-of-N, self-correction, adversarial verification) bundled
 not a change to the model's single-shot reasoning.
 
 **This base variant runs on Claude Code alone, no external model.** For the stronger variant that
-hands adversarial verification to GPT-5.5 (Codex), use the `pantheon-x` skill.
+hands adversarial verification to GPT-5.6 Sol (Codex), use the `pantheon-x` skill.
 
 ## Requirements
 - **Claude Code's Workflow orchestration is required.** It only runs on a paid plan
@@ -31,10 +31,14 @@ hands adversarial verification to GPT-5.5 (Codex), use the `pantheon-x` skill.
   cross-model verification, use `pantheon-x`.)
 
 ## When to use
-- Hard implementations / refactors / migrations, or any coding task whose **correctness can be
+- Hard, self-contained implementations, or any coding task whose **correctness can be
   defined as tests**.
 - Don't use for easy one-shot questions or trivial fixes — just answer directly. Each run costs real
   tokens (route only the hardest 10–20% here).
+- **Not for changing an existing repo.** Each builder writes into a fresh `workdir/variant-i` and
+  never sees your codebase, so a refactor or migration has nothing to refactor. To change code that
+  already exists, use **`pantheon-fix`** — it clones HEAD into a git worktree per variant and gates on
+  your real test suite.
 
 ## Procedure (when this skill triggers)
 1. **Pin the task.** Extract the implementation requirement from the user's message. If unclear, ask

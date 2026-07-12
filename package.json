@@ -1,0 +1,13 @@
+{
+  "name": "pantheon-skills",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-agent harnesses (generate / gap-analysis / fix) for Claude Code, with cross-model adversarial verification.",
+  "scripts": {
+    "inline": "node scripts/inline.js",
+    "inline:check": "node scripts/inline.js --check",
+    "test": "node --test",
+    "check": "npm run inline:check && npm test && node scripts/check-syntax.js && node scripts/check-skills.js"
+  }
+}

@@ -2,17 +2,16 @@
 name: pantheon-fix
 description: >-
   A skill that FIXES an existing bug or gap in a real repo through a multi-agent harness instead of a
-  single patch pass. It records a test baseline, plans the fix, then builds N candidate fixes in
-  parallel — each in its own isolated git worktree, writing a failing repro test, applying a minimal
-  fix, and gating on "no test that passed before now fails" (regression guard) + "the repro test now
-  passes" — then has adversarial reviewers (Claude) try to break each fix, and a judge picks the
-  smallest, safest patch. It outputs a diff and does NOT touch your working tree unless apply:true.
-  Pairs with pantheon-gap (which finds the gaps). Use when the user says "pantheon fix", "fix this bug
-  with pantheon", "fix this gap", "patch this safely", "fix it without regressions", "이거 고쳐줘
-  판테온으로", "버그 고쳐", "갭 고쳐", "회귀 없이 고쳐", "패치 만들어줘". For GPT-5.5 cross-model
-  verification use pantheon-fix-x; to pick the verifier model use pantheon-fix-custom. For REVIEWING
-  (finding gaps, not fixing) use pantheon-gap; for GENERATING new code use pantheon. Don't use for a
-  trivial one-line edit (cost is high).
+  single patch pass. It records a test baseline, then builds N candidate fixes in parallel — each in
+  its own isolated git worktree with a failing repro test — gated on "nothing that passed before now
+  fails" + "the repro test now passes". Adversarial reviewers (Claude) then try to break each fix and
+  a judge picks the smallest safe patch; if they break all of them, NOTHING wins. Outputs a diff and
+  never touches your working tree unless apply:true. Pairs with pantheon-gap.
+  Use when the user says "pantheon fix", "fix this bug with pantheon", "fix this gap", "patch this
+  safely", "fix it without regressions", "이거 고쳐줘 판테온으로", "버그 고쳐", "갭 고쳐", "회귀 없이
+  고쳐", "패치 만들어줘". For GPT-5.6 cross-model verification use pantheon-fix-x; to pick the verifier
+  model use pantheon-fix-custom. To FIND gaps (not fix) use pantheon-gap; to GENERATE new code use
+  pantheon. Don't use for a trivial one-line edit (cost is high).
 ---
 
 # Pantheon fix harness (Claude adversarial verify)
@@ -26,14 +25,21 @@ working tree is never touched, and the output is a **diff you review before appl
 
 ## What makes it safe
 - **Worktree isolation** — each of the N fix variants works in its own `git worktree` (a throwaway
-  checkout at HEAD). Your actual working tree is left alone.
+  checkout at HEAD), at a path the *harness* chooses. Your actual working tree is left alone, and
+  cleanup only ever removes worktrees this run created and git confirms are registered.
 - **Regression gate** — each variant records which tests pass at HEAD *before* fixing, then re-runs the
   full suite after; if any previously-passing test now fails, that variant is marked `regressed` and
   dropped. (CLAUDE.md rule: never break working code.)
 - **Repro gate** — for a testable defect, the variant first writes a test that *reproduces* the bug
-  (must fail first), then must make it pass. A fix that doesn't actually fix the bug can't win.
+  (must fail first), then must make it pass. A fix that doesn't actually fix the bug can't win — and
+  "didn't regress anything" does not qualify as a fix.
+- **Every gate is fail-closed.** If no fix passes the gates, or the adversarial reviewers break all of
+  them, or too few reviewers actually ran to trust the vote, the run returns a structured
+  **no-winner** result (`no_repro_passing_fix`, `all_candidates_refuted`,
+  `insufficient_verifier_quorum`) and offers no patch. It never promotes the least-bad candidate.
 - **Diff-only by default** — the winning patch is returned as text. It is applied to your working tree
-  **only if you pass `apply: true`**. Nothing is ever committed.
+  **only if you pass `apply: true`** *and* the tree is clean. Applying is transactional: if the patch
+  doesn't apply or the suite goes red, the tree is rolled back to HEAD. Nothing is ever committed.
 
 ## Requirements
 - **Workflow orchestration** — a paid plan (Pro/Max/Team/Enterprise, v2.1.154+); on Pro enable
@@ -61,7 +67,9 @@ working tree is never touched, and the output is a **diff you review before appl
      `python3 -m unittest`); otherwise the Baseline agent detects it.
    - `variants`: usually 3, up to 5. `verifiers`: usually 2, up to 3.
    - `apply`: omit (or `false`) to get a diff only; `true` to also apply it to the working tree (still
-     not committed). Default to diff-only unless the user says "just fix it / apply it."
+     not committed). Default to diff-only unless the user says "just fix it / apply it." **`apply:
+     true` needs a clean tree** — otherwise a failed apply couldn't be rolled back, so the harness
+     refuses and falls back to diff-only. Tell the user to commit/stash if that happens.
 3. **Run the Workflow** — **Read `pantheon-fix-class.js` in this same directory** and pass its contents
    inline as the `script` argument:
    ```
@@ -91,6 +99,6 @@ working tree is never touched, and the output is a **diff you review before appl
 ## Notes
 - **Not a resident process.** One-shot per call, then exits.
 - **One defect per run** keeps the patch minimal and the diff easy to review — that's the point.
-- For GPT-5.5 cross-model verification use **`pantheon-fix-x`**; to pick the verifier model (DeepSeek,
+- For GPT-5.6 Sol cross-model verification use **`pantheon-fix-x`**; to pick the verifier model (DeepSeek,
   Qwen, local Ollama, …) use **`pantheon-fix-custom`**.
 - Coding/agentic productivity only. Not for bypassing safety gates.

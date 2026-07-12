@@ -5,12 +5,11 @@ description: >-
   the user PICKS which AI model runs the adversarial verification — including non-Anthropic models like
   DeepSeek, Qwen, Kimi, or a local Ollama/LM Studio model). Same plan → parallel variants (test-driven
   self-correction) → adversarial verification → synthesis pipeline as the pantheon base, but the
-  verifier is chosen per run via a `verifier` argument and external/local models are driven through the
-  `codex` CLI (which is itself a multi-provider router). Use when the user says "pantheon custom",
+  verifier is chosen per run via a `verifier` argument. Use when the user says "pantheon custom",
   "verify with deepseek/qwen", "use DeepSeek as the grader", "have a local model break it", "외부
   모델로 검증", "딥시크로 채점", "큐원으로 검증", "오픈클로처럼 채점자 모델 골라서", "로컬 모델로
   검증". If no model is given it defaults to Claude (same as the pantheon base). For the fixed presets
-  use pantheon (Claude) / pantheon-x (GPT-5.5). For REVIEWING an existing project rather than generating
+  use pantheon (Claude) / pantheon-x (GPT-5.6 Sol). To REVIEW an existing project rather than generate
   code, use pantheon-gap-custom. Don't use for easy one-shot work (cost is high).
 ---
 
@@ -18,7 +17,7 @@ description: >-
 
 Same `plan → parallel variants → test-driven self-correction → adversarial verification → synthesis`
 pipeline as the `pantheon` base, but **the user picks which AI model runs the adversarial-verify step
-per run** instead of it being fixed. `pantheon` always uses Claude; `pantheon-x` always uses GPT-5.5.
+per run** instead of it being fixed. `pantheon` always uses Claude; `pantheon-x` always uses GPT-5.6 Sol.
 This skill lets you point the verifier at **any model the `codex` CLI can reach** — DeepSeek, Qwen,
 Kimi, a local Ollama/LM Studio model, or your own configured provider — as well as the Claude tiers.
 
@@ -35,10 +34,10 @@ OpenClaw-style, and handles API keys), or name one inline per run. The verifier 
 |------------------|----------------------------|--------------|
 | omitted / `claude` | Claude (session model) — same as the base | none |
 | `opus` / `sonnet` / `haiku` / `fable` | that Claude tier | none |
-| `codex` / `gpt` | GPT-5.5, via the Codex **plugin** (`codex:codex-rescue`) | Codex plugin |
-| `deepseek` | DeepSeek (`deepseek-chat`) | `codex` CLI + `DEEPSEEK_API_KEY` |
-| `qwen` | Qwen2.5-Coder via OpenRouter | `codex` CLI + `OPENROUTER_API_KEY` |
-| `kimi` | Kimi / Moonshot | `codex` CLI + `MOONSHOT_API_KEY` |
+| `codex` / `gpt` | GPT-5.6 Sol, via a shell-out to the Codex plugin's `codex-companion.mjs` | Codex plugin + `codex` login |
+| `deepseek` | DeepSeek (`deepseek-chat`) | `DEEPSEEK_API_KEY` |
+| `qwen` | Qwen2.5-Coder via Alibaba DashScope | `DASHSCOPE_API_KEY` |
+| `kimi` | Kimi / Moonshot | `MOONSHOT_API_KEY` |
 | `ollama:<model>` / `lmstudio:<model>` | a **local** model (e.g. `ollama:qwen2.5-coder`) | `codex` CLI + Ollama/LM Studio running, model pulled |
 | `profile:<name>` | a profile from your `~/.codex/config.toml` (any provider) | `codex` CLI + that profile |
 | `model:<name>` or a bare model id | that codex model id | `codex` CLI configured for it |
@@ -48,16 +47,19 @@ OpenClaw-style, and handles API keys), or name one inline per run. The verifier 
   `/config` → Dynamic workflows. Same as `pantheon`. Not on the Free tier.
 - **Claude-tier verifiers (`opus`/`sonnet`/`haiku`/`fable`) need nothing extra.**
 - **External / local verifiers need the `codex` CLI on PATH** — it's the router this skill drives via
-  `codex exec`. Note this is the codex **binary**, *not* the Codex plugin: the plugin (`codex:codex-rescue`)
+  `codex exec`. Note this is the codex **binary**; the plugin's `codex-companion.mjs`
   is only needed for `verifier: codex`/`gpt`. Per choice:
   - `deepseek` / `qwen` / `kimi` → the matching API-key env var must be set (`DEEPSEEK_API_KEY`,
-    `OPENROUTER_API_KEY`, `MOONSHOT_API_KEY`).
+    `DASHSCOPE_API_KEY`, `MOONSHOT_API_KEY`).
   - `ollama:` / `lmstudio:` → that local server running with the model pulled (no API key, fully local).
   - `profile:` / bare model id → the provider/model defined in `~/.codex/config.toml`.
 - **If the chosen verifier can't actually run** (codex missing, key unset, model unreachable), the
-  driver returns a no-defect verdict tagged "external verifier unavailable" rather than fabricating
-  one — so a build won't be falsely broken, but verification didn't really happen. Check availability
-  first (step 2); if you can't, fall back to the `pantheon` base or a Claude tier.
+  driver returns a verdict marked `unavailable: true` instead of fabricating one. The harness counts
+  it as an ABSTENTION (excluded from the vote), and a variant with zero real verdicts is flagged
+  `unverified` — and an unverified variant CANNOT win: if too few reviewers actually returned a
+  verdict to reach quorum, the run ends with `insufficient_verifier_quorum` and no winner rather than
+  crowning something nobody checked. When reporting, say so plainly. Check
+  availability first (step 2); if you can't, fall back to the `pantheon` base or a Claude tier.
 
 ## When to use
 - A hard implementation/refactor/migration whose **correctness is testable**, where you want a specific
@@ -80,7 +82,7 @@ OpenClaw-style, and handles API keys), or name one inline per run. The verifier 
    alias (`deepseek`, `qwen`, `kimi`, `codex`, `ollama:<m>`, `profile:<name>`).
 2. **Sanity-check the verifier can run:**
    - Claude tier → nothing to check.
-   - `codex`/`gpt` → the `codex:codex-rescue` agent type (Codex plugin) is installed.
+   - `codex`/`gpt` → the Codex plugin's `codex-companion.mjs` exists and `codex login status` is OK.
    - Local (`ollama/…`, `lmstudio/…`) → `codex` CLI on PATH and the local server up with the model pulled.
    - Cloud (deepseek, qwen, gemini, …) → `codex` CLI on PATH and the provider's key available
      (`printenv <ENVKEY>`, or in `~/.pantheon/env` which the harness sources before codex). **If the key

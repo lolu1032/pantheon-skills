@@ -25,7 +25,7 @@ finding strips the false positives a single-pass review sprays.
 - **Claude Code's Workflow orchestration is required** — a paid plan (Pro/Max/Team/Enterprise,
   v2.1.154+); on Pro enable it once in `/config` → **Dynamic workflows**. Same as `pantheon`. Not on
   the Free tier.
-- No external model needed. To route the adversarial *confirm* step to GPT-5.5, set
+- No external model needed. To route the adversarial *confirm* step to GPT-5.6 Sol, set
   `crossModelVerify: true` (needs the Codex plugin, like `pantheon-x`).
 
 ## When to use
@@ -44,7 +44,7 @@ finding strips the false positives a single-pass review sprays.
    - `maxDimensions`: how many dimensions to probe (default 6).
    - `verifiers`: skeptical reviewers per finding (default 2; bump to 3 to be stricter — a finding is
      kept only if a majority confirm it).
-   - `crossModelVerify`: `true` routes the confirm step to GPT-5.5/Codex (default `false`).
+   - `crossModelVerify`: `true` routes the confirm step to GPT-5.6 Sol/Codex (default `false`).
 3. **Run the Workflow** — **Read `pantheon-gap-class.js` in this same directory**, then pass its
    contents inline as the Workflow `script` argument:
    ```
@@ -64,7 +64,7 @@ finding strips the false positives a single-pass review sprays.
 - **Probe** — one agent per dimension hunts for gaps (missing/incomplete/weak), each citing
   file-level evidence; high-signal findings over a long noisy list.
 - **Confirm** — for each candidate gap, V skeptical reviewers try to DISMISS it (already handled?
-  out of scope? false positive?); a gap is kept only if a majority confirm it. Optionally GPT-5.5.
+  out of scope? false positive?); a gap is kept only if a majority confirm it. Optionally GPT-5.6 Sol.
 - **Synthesize** — a judge dedups and prioritizes by impact × effort: top gaps, quick wins, and the
   highest-leverage next fix.
 

@@ -1,35 +1,37 @@
 ---
 name: pantheon-model
 description: >-
-  Configures WHICH AI model runs the adversarial step in pantheon-custom / pantheon-gap-custom — the
+  Configures WHICH AI model runs the adversarial step in pantheon-custom / pantheon-gap-custom /
+  pantheon-fix-custom — the
   OpenClaw-style "pick your model" setup, as its own command. It lists the models actually available on
-  this machine (Claude tiers, GPT-5.5 via Codex, local Ollama/LM Studio models, and the cloud catalog
+  this machine (Claude tiers, GPT-5.6 Sol via Codex, local Ollama/LM Studio models, and the cloud catalog
   in providers.json — DeepSeek, Qwen, Gemini, Mistral, Groq, xAI/Grok, Kimi, …), lets the user pick one
   (OpenClaw-style `provider/model-id`), securely sets up the API key in a file (never in chat) when a
   cloud model needs one, and saves the choice to ~/.pantheon/config.json so the custom skills use it
   without asking again. Use when the user says "pantheon model", "pantheon-model", "pick/choose the
   pantheon verifier model", "change the pantheon model", "configure pantheon custom", "팬테온 모델
   설정", "모델 고르기/다시 고를래", "채점 모델 바꿔". This skill only CONFIGURES; to actually run a job
-  use pantheon-custom (generate) or pantheon-gap-custom (review).
+  use pantheon-custom (generate), pantheon-gap-custom (review), or pantheon-fix-custom (fix).
 ---
 
 # Pantheon model picker (OpenClaw-style setup for the `*-custom` skills)
 
 OpenClaw selects its model in a standalone onboarding before you talk to it. This is the Claude-skill
 equivalent: a dedicated command that **picks + configures the adversarial-verify model** used by
-`pantheon-custom` and `pantheon-gap-custom`, and saves it to `~/.pantheon/config.json`. Those skills
+`pantheon-custom`, `pantheon-gap-custom`, and `pantheon-fix-custom`, and saves it to
+`~/.pantheon/config.json`. Those skills
 then read that config and never re-ask. (`pantheon` / `pantheon-x` / `pantheon-gap` / `pantheon-gap-x`
 are fixed-model presets and ignore this — it only drives the `*-custom` pair.)
 
 It does **two** things: choose the model, and (for cloud models) set up the API key safely. It does
-**not** run a harness — that's `pantheon-custom` / `pantheon-gap-custom`.
+**not** run a harness — that is `pantheon-custom` / `pantheon-gap-custom` / `pantheon-fix-custom`.
 
 ## Procedure (when this skill triggers)
 1. **Show current state.** Read `~/.pantheon/config.json`; if it exists, tell the user the current
    `verifier`. If they only wanted to see it, stop. If they want to change/clear it, continue.
 2. **Detect what's actually available on this machine** (so the menu only offers real options):
    - **Claude tiers** (always, no setup): `anthropic/opus`, `anthropic/sonnet`, `anthropic/haiku`.
-   - **`codex`** (GPT-5.5) — include if the `codex:codex-rescue` agent type / Codex plugin is installed.
+   - **`codex`** (GPT-5.6 Sol) — include if the Codex plugin's `codex-companion.mjs` is present and `codex` is logged in.
    - **Local** — run `ollama list` (and check LM Studio); list `ollama/<model>` for each pulled model
      (no key needed).
    - **Cloud** — read **`providers.json`** in this skill's directory (the catalog mirrored from
