@@ -257,6 +257,28 @@ So instead:
    crossModelVerified: true,  verdictProvenance: { total: 56, fromCodex: 56, pct: 100 }
 ```
 
+## Does the fail-closed gate actually matter?
+
+It fired on its first real job. `pantheon-fix-x` was pointed at a live anti-cheat bypass in a running
+app — a defect whose reviewer-suggested fix was, on paper, one word. Across two rounds it built six
+candidate fixes. Every one passed its own repro test and regressed nothing. **The adversarial
+reviewers broke all six**, each time with a failing case they had actually run:
+
+| # | What broke the candidate |
+|---|---|
+| 1 | The naive fix bans honest runners (re-opens a false positive an earlier commit had closed) |
+| 2 | Despiking deletes the very evidence the fix was preserving |
+| 3 | The threshold false-positives on Android's integer-second timestamps |
+| 4 | Neutralizing that re-breaks spike detection |
+| 5 | The detector *sorts by timestamp*, so backward-timestamp evidence never survives to be checked |
+| 6 | The threshold is per-segment, so a cheater just splits the jump in two |
+
+The old harness would have shipped one of them — it had a fallback that crowned the "best of" a fully
+refuted field, and `apply: true` would have written it to the working tree. The current one returns
+`all_candidates_refuted`, offers **no patch**, and hands back a precise, empirically-verified account
+of why every approach fails. That's the whole product: a harness that refuses is worth more than one
+that guesses.
+
 ## How the safety gates work
 
 The whole point of a harness is that it refuses to hand you something it couldn't verify. Three rules
