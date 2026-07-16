@@ -3,6 +3,8 @@
   "format": "provider/model-id",
   "_codexComment": "The model the `-x` skills pin for cross-model adversarial verification. The Codex plugin's rescue agent leaves the model UNSET by default, which silently falls back to whatever is in ~/.codex/config.toml — so an `-x` run could be verified by any model while the report still claimed GPT-5.x. The skills now pass this explicitly and record the resolved id in their output. Requires codex-cli >= 0.140 (older builds reject gpt-5.6-* with a 400).",
   "codex": { "model": "gpt-5.6-sol", "label": "GPT-5.6 Sol (Codex)", "minCliVersion": "0.140.0" },
+  "_grokComment": "The model the tri-model (Claude + GPT + Grok) skill pins for GROK cross-model verification. The skill shells out to the `grok` CLI headless mode (`grok --prompt-file <f> --output-format json --sandbox read-only -m <model> --effort <level>`), which relays {text, sessionId, ...}. Every genuine verdict is stamped [grok:<sessionId>] so a transcriber that never ran the CLI cannot fake provenance (same design as codex). Requires a logged-in grok CLI (`grok login`); the CLI login exposes grok-4.5, DISTINCT from the xai HTTP catalog entry's grok-4.",
+  "grok": { "model": "grok-4.5", "label": "Grok 4.5 (xAI CLI)", "minCliVersion": "0.2.63" },
   "_baseUrlWarning": "Base URLs are best-effort and drift as providers rewrite their APIs. A wrong baseUrl surfaces as a non-200 from the driver, which the harness records as `unavailable` (an abstention) — it never silently passes. Entries flagged \"unverified\": true have not been exercised against a live key.",
   "providers": {
     "anthropic": { "special": "claude", "label": "Anthropic Claude", "models": ["opus", "sonnet", "haiku"] },

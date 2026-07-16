@@ -4,6 +4,13 @@ import { readFileSync } from 'node:fs'
 import {
   fromCodex,
   codexTranscriber,
+  fromGrok,
+  grokTranscriber,
+  GROK_MODEL,
+  stampedBy,
+  assignFleet,
+  tallyTriRefutation,
+  triModelAudit,
   crossModelAudit,
   verifierQuorum,
   tallyRefutation,
@@ -318,6 +325,108 @@ test('a verdict only counts as cross-model if it carries a real codex thread id'
   // A transcriber that fakes the marker without running the command must not satisfy the audit.
   assert.equal(fromCodex({ description: '[codex:yes-i-really-did] trust me' }), false)
   assert.equal(fromCodex({ description: '[codex:] ' }), false)
+})
+
+// Grok is the third seat, wired symmetrically to codex. Same provenance guarantee: only a real
+// [grok:<uuid>] sessionId stamp counts; a faked or malformed marker does not.
+const GROK_STAMP = '[grok:019f6556-0a2f-7720-8709-d103286fe9f8]'
+test('a verdict only counts as Grok cross-model if it carries a real grok session id', () => {
+  assert.equal(fromGrok({ defectFound: false, description: `${GROK_STAMP} could not break it` }), true)
+  assert.equal(fromGrok({ valid: true, reason: `${GROK_STAMP} real gap` }), true)
+  assert.equal(fromGrok(clean()), false, 'an unstamped verdict is not cross-model')
+  // A transcriber that fakes the marker without running the CLI must not satisfy the audit.
+  assert.equal(fromGrok({ description: '[grok:yes-i-really-did] trust me' }), false)
+  assert.equal(fromGrok({ description: '[grok:] ' }), false)
+  // The two model stamps are distinct — a codex stamp is not a grok stamp and vice versa.
+  assert.equal(fromGrok({ description: '[codex:019f6556-0a2f-7720-8709-d103286fe9f8] x' }), false)
+  assert.equal(fromCodex({ description: `${GROK_STAMP} x` }), false)
+})
+
+test('the grok transcriber pins the model and forbids the agent from judging on its own', () => {
+  const p = grokTranscriber({ core: 'review this', cwd: '/tmp/x', verdictJson: '{}', unavailableJson: '{}' })
+  assert.match(p, new RegExp(`-m ${GROK_MODEL}`))
+  assert.match(p, /--output-format json/)
+  assert.match(p, /--sandbox read-only/)
+  assert.match(p, /NOT the reviewer/)
+  assert.match(p, /NEVER substitute your own judgment/)
+  assert.match(p, /\[grok:<sessionId>\]/)
+})
+
+// ---------------------------------------------------------------------------
+// three-way (Claude + GPT + Grok) verifier fleet
+// ---------------------------------------------------------------------------
+const CODEX_UUID = '[codex:3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f607]'
+const GROK_UUID = '[grok:019f6556-0a2f-7720-8709-d103286fe9f8]'
+const codexV = (defectFound = false, severity = 'none') => ({ defectFound, severity, description: `${CODEX_UUID} x` })
+const grokV = (defectFound = false, severity = 'none') => ({ defectFound, severity, description: `${GROK_UUID} x` })
+
+test('stampedBy distinguishes the two models, and only real UUIDs count', () => {
+  assert.equal(stampedBy(codexV(), 'codex'), true)
+  assert.equal(stampedBy(codexV(), 'grok'), false, 'a codex verdict is not a grok verdict')
+  assert.equal(stampedBy(grokV(), 'grok'), true)
+  assert.equal(stampedBy(grokV(), 'codex'), false)
+  assert.equal(stampedBy(clean(), 'codex'), false, 'unstamped is nobody')
+  assert.equal(stampedBy({ description: '[codex:fake] x' }, 'codex'), false)
+})
+
+test('assignFleet round-robins reviewers across the fleet', () => {
+  assert.deepEqual(assignFleet(['codex', 'grok'], 2), ['codex', 'grok'])
+  assert.deepEqual(assignFleet(['codex', 'grok'], 4), ['codex', 'grok', 'codex', 'grok'])
+  assert.deepEqual(assignFleet([], 2), ['codex', 'codex'], 'empty fleet falls back to codex')
+})
+
+test('a genuine three-way needs a real verdict from BOTH GPT and Grok', () => {
+  const asg = assignFleet(['codex', 'grok'], 2)
+
+  const ok = tallyTriRefutation([codexV(), grokV()], asg, 2)
+  assert.equal(ok.realCount, 2)
+  assert.deepEqual(ok.perModel, { codex: 1, grok: 1 })
+  assert.equal(ok.everyModelPresent, true)
+  assert.equal(ok.unverified, false)
+  assert.equal(ok.refuted, false)
+
+  // Grok dead all run -> GPT-only -> unverified, NOT a silent pass.
+  const grokDead = tallyTriRefutation([codexV(), dead()], asg, 2)
+  assert.equal(grokDead.everyModelPresent, false)
+  assert.equal(grokDead.unverified, true)
+  assert.equal(grokDead.refuted, false)
+})
+
+test('tri tally stays index-aligned when a reviewer returns null', () => {
+  // reviewer 0 (codex) died -> rawVerdicts[0] is null; reviewer 1 (grok) answered. A naive
+  // filter-first would credit grok's verdict to codex — it must not.
+  const asg = assignFleet(['codex', 'grok'], 2)
+  const t = tallyTriRefutation([null, grokV()], asg, 2)
+  assert.deepEqual(t.perModel, { codex: 0, grok: 1 })
+  assert.equal(t.everyModelPresent, false, 'codex never answered, so not a three-way')
+  assert.equal(t.unverified, true)
+})
+
+test('a stamped defect from either model refutes on a tie', () => {
+  const asg = assignFleet(['codex', 'grok'], 2)
+  const t = tallyTriRefutation([codexV(true, 'high'), grokV(false)], asg, 2)
+  assert.equal(t.realCount, 2)
+  assert.equal(t.everyModelPresent, true)
+  assert.equal(t.refuted, true, 'one confirmed defect + tie refutes')
+})
+
+test('the tri provenance audit reports a degraded run instead of hiding it', () => {
+  const fleet = ['codex', 'grok']
+  const honest = [
+    { realCount: 2, perModel: { codex: 1, grok: 1 } },
+    { realCount: 2, perModel: { codex: 1, grok: 1 } },
+  ]
+  const a = triModelAudit(honest, fleet)
+  assert.equal(a.total, 4)
+  assert.deepEqual(a.perModel, { codex: 2, grok: 2 })
+  assert.equal(a.verified, true)
+
+  // Grok contributed nothing across the whole run -> not a verified three-way.
+  const degraded = [
+    { realCount: 1, perModel: { codex: 1, grok: 0 } },
+    { realCount: 1, perModel: { codex: 1, grok: 0 } },
+  ]
+  assert.equal(triModelAudit(degraded, fleet).verified, false)
 })
 
 test('under crossVerify, an UNSTAMPED verdict abstains — so codex-rescue cannot fake an -x run', () => {

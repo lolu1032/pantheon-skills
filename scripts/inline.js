@@ -90,6 +90,14 @@ const REGIONS = {
       `const CODEX_LABEL = ${JSON.stringify(catalog.codex.label)}`,
     ],
   },
+  GROK: {
+    begin: '// --- GENERATED:GROK from providers.json by scripts/inline.js — DO NOT HAND-EDIT ---',
+    end: '// --- END GENERATED:GROK ---',
+    body: [
+      `const GROK_MODEL = ${JSON.stringify(catalog.grok.model)}`,
+      `const GROK_LABEL = ${JSON.stringify(catalog.grok.label)}`,
+    ],
+  },
   TABLE: {
     begin: '// --- GENERATED:TABLE from providers.json by scripts/inline.js — DO NOT HAND-EDIT ---',
     end: '// --- END GENERATED:TABLE ---',
